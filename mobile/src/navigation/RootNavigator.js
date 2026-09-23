@@ -15,8 +15,11 @@ import EmergencyContactsScreen from '../screens/citizen/EmergencyContactsScreen'
 
 // Rescuer Screens
 import RescuerHomeScreen from '../screens/rescuer/RescuerHomeScreen';
+import RescueRequestScreen from '../screens/rescuer/RescueRequestScreen';
 import ActiveRescueScreen from '../screens/rescuer/ActiveRescueScreen';
 import AnimalQrScreen from '../screens/rescuer/AnimalQrScreen';
+import RescuerProfileScreen from '../screens/rescuer/RescuerProfileScreen';
+import RescuerHistoryScreen from '../screens/rescuer/RescuerHistoryScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -37,8 +40,11 @@ export default function RootNavigator() {
 
         {/* Rescuer Flow */}
         <Stack.Screen name="RescuerHome" component={RescuerHomeScreen} />
+        <Stack.Screen name="RescueRequest" component={RescueRequestScreen} />
         <Stack.Screen name="ActiveRescue" component={ActiveRescueScreen} />
         <Stack.Screen name="AnimalQr" component={AnimalQrScreen} />
+        <Stack.Screen name="RescuerProfile" component={RescuerProfileScreen} />
+        <Stack.Screen name="RescuerHistory" component={RescuerHistoryScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

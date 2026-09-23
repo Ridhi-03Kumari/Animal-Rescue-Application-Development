@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Image,
 } from 'react-native';
 import api from '../../services/api';
 
@@ -69,12 +68,10 @@ export default function RescuerHomeScreen({ navigation }) {
             onPress: async () => {
               try {
                 await api.acceptCase(caseItem._id);
-                Alert.alert('Rescue Accepted!', 'Navigating to active rescue screen.');
-                navigation.navigate('ActiveRescue', { caseId: caseItem._id });
-              } catch (acceptErr) {
-                // If endpoint expects rescuerId, still proceed to active screen
-                navigation.navigate('ActiveRescue', { caseId: caseItem._id });
+              } catch (e) {
+                console.log('Proceeding to active rescue');
               }
+              navigation.navigate('ActiveRescue', { caseId: caseItem._id });
             },
           },
         ]
@@ -128,11 +125,11 @@ export default function RescuerHomeScreen({ navigation }) {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      {/* Header */}
-      <View style={styles.header}>
+      {/* Header with Navigation Bar */}
+      <View style={styles.topHeader}>
         <View>
           <Text style={styles.title}>Rescuer Portal</Text>
-          <Text style={styles.subtitle}>Bengaluru Animal Emergency Response</Text>
+          <Text style={styles.subtitle}>Bengaluru Emergency Dispatch</Text>
         </View>
 
         <TouchableOpacity
@@ -142,6 +139,30 @@ export default function RescuerHomeScreen({ navigation }) {
           <Text style={[styles.statusToggleText, isAvailable ? styles.availableText : styles.busyText]}>
             {isAvailable ? '● Online' : '○ Busy'}
           </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Navigation Quick Links (Profile & History) */}
+      <View style={styles.navRow}>
+        <TouchableOpacity
+          style={styles.navChip}
+          onPress={() => navigation.navigate('RescuerProfile')}
+        >
+          <Text style={styles.navChipText}>👤 My Profile</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navChip}
+          onPress={() => navigation.navigate('RescuerHistory')}
+        >
+          <Text style={styles.navChipText}>📜 Case History</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navChip}
+          onPress={() => navigation.navigate('CitizenHome')}
+        >
+          <Text style={styles.navChipText}>⇄ Citizen View</Text>
         </TouchableOpacity>
       </View>
 
@@ -177,19 +198,24 @@ export default function RescuerHomeScreen({ navigation }) {
           <Text style={styles.emptyIcon}>🐾</Text>
           <Text style={styles.emptyTitle}>No Pending Emergencies</Text>
           <Text style={styles.emptyText}>
-            You are online and available. New rescue cases reported nearby will appear here immediately.
+            You are online and ready. When citizens report injured animals nearby, rescue requests will appear here.
           </Text>
         </View>
       ) : (
         cases.map((c) => {
           const badge = getUrgencyBadge(c.urgency);
           return (
-            <View key={c._id} style={styles.card}>
+            <TouchableOpacity
+              key={c._id}
+              style={styles.card}
+              onPress={() => navigation.navigate('RescueRequest', { caseItem: c })}
+              activeOpacity={0.9}
+            >
               <View style={styles.cardTop}>
                 <View style={[styles.badge, { backgroundColor: badge.bg }]}>
                   <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
                 </View>
-                <Text style={styles.caseId}>Case #{c._id.slice(-5).toUpperCase()}</Text>
+                <Text style={styles.viewDetailsText}>View Details →</Text>
               </View>
 
               <Text style={styles.animalName}>Injured {c.animalType.toUpperCase()}</Text>
@@ -205,9 +231,10 @@ export default function RescuerHomeScreen({ navigation }) {
               </Text>
 
               <Text style={styles.reporterInfo}>
-                👤 Reported by: {c.reporterName || 'Anonymous Citizen'} {c.reporterPhone ? `(${c.reporterPhone})` : ''}
+                👤 Reported by: {c.reporterName || 'Anonymous Citizen'}
               </Text>
 
+              {/* Direct Quick Actions */}
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.declineBtn]}
@@ -223,7 +250,7 @@ export default function RescuerHomeScreen({ navigation }) {
                   <Text style={styles.acceptText}>Accept Rescue</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         })
       )}
@@ -241,11 +268,11 @@ const styles = StyleSheet.create({
     paddingTop: 45,
     paddingBottom: 40,
   },
-  header: {
+  topHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   title: {
     fontSize: 24,
@@ -258,8 +285,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   statusToggle: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
     borderRadius: 20,
     borderWidth: 1,
   },
@@ -272,7 +299,7 @@ const styles = StyleSheet.create({
     borderColor: '#C62828',
   },
   statusToggleText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   availableText: {
@@ -280,6 +307,24 @@ const styles = StyleSheet.create({
   },
   busyText: {
     color: '#C62828',
+  },
+  navRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  navChip: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5DED9',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  navChipText: {
+    color: '#2F5D50',
+    fontSize: 12,
+    fontWeight: '600',
   },
   activeBanner: {
     backgroundColor: '#2F5D50',
@@ -391,10 +436,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  caseId: {
+  viewDetailsText: {
     fontSize: 12,
-    color: '#888888',
-    fontWeight: '500',
+    color: '#2F5D50',
+    fontWeight: '700',
   },
   animalName: {
     fontSize: 18,
