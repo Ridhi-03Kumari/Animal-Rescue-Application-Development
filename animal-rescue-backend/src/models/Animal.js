@@ -13,6 +13,10 @@ const animalSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    name: {
+      type: String,
+      default: '',
+    },
     photos: [{ type: String }],
     foundLocation: {
       latitude: { type: Number, required: true },
@@ -42,6 +46,10 @@ const animalSchema = new mongoose.Schema(
     },
     qrCodeUrl: {
       type: String,
+      default: '',
+    },
+    qrCodeData: {
+      type: String, // Base64 Data URL for scannable QR tag
       default: '',
     },
   },

@@ -1,5 +1,7 @@
 const Case = require('../models/Case');
 const dispatchService = require('../services/dispatchService');
+const { assessUrgency } = require('../services/aiTriageService');
+const { emitCaseEvent } = require('../socket');
 
 // POST /api/v1/reports
 exports.createReport = async (req, res, next) => {
@@ -23,9 +25,18 @@ exports.createReport = async (req, res, next) => {
     }
 
     const citizenId = req.user ? req.user.id : null;
-    const initialUrgency = ['LOW', 'MEDIUM', 'HIGH'].includes((urgency || '').toUpperCase())
-      ? urgency.toUpperCase()
-      : 'MEDIUM';
+
+    // AI Urgency Triage Assessment with 5s timeout & fallback
+    let determinedUrgency = urgency;
+    let safeGuidance = '';
+
+    if (!determinedUrgency || !['LOW', 'MEDIUM', 'HIGH'].includes(determinedUrgency.toUpperCase())) {
+      const triage = await assessUrgency({ animalType, description, photoUrl });
+      determinedUrgency = triage.urgency;
+      safeGuidance = triage.guidance;
+    } else {
+      determinedUrgency = determinedUrgency.toUpperCase();
+    }
 
     // Create the case record
     const newCase = await Case.create({
@@ -40,18 +51,18 @@ exports.createReport = async (req, res, next) => {
         longitude: parseFloat(longitude),
         address: address || '',
       },
-      urgency: initialUrgency,
+      urgency: determinedUrgency,
       status: 'reported',
       timeline: [
         {
           status: 'reported',
           timestamp: new Date(),
-          note: 'Emergency rescue reported by citizen',
+          note: `Emergency rescue reported. AI Urgency: ${determinedUrgency}`,
         },
       ],
     });
 
-    // Start smart responder matching in background or synchronously
+    // Start smart responder matching
     let dispatchResult = null;
     try {
       dispatchResult = await dispatchService.dispatchCase(newCase._id);
@@ -64,10 +75,17 @@ exports.createReport = async (req, res, next) => {
       .populate('assignedRescuer')
       .populate('citizen', 'name phone');
 
+    // Notify socket watchers of new case
+    emitCaseEvent(newCase._id, 'case_created', {
+      case: populatedCase,
+      urgency: determinedUrgency,
+    });
+
     res.status(201).json({
       success: true,
       message: 'Rescue report submitted successfully',
       case: populatedCase,
+      guidance: safeGuidance,
       dispatch: dispatchResult
         ? {
             alertedRescuerId: dispatchResult.selectedRescuer._id,

@@ -10,9 +10,16 @@ const rescuerSchema = new mongoose.Schema(
       longitude: { type: Number },
     },
     available: { type: Boolean, default: true },
+    isVerified: { type: Boolean, default: true },
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'approved',
+    },
     activeCaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Case', default: null },
     completedCasesCount: { type: Number, default: 0 },
     averageResponseTime: { type: Number, default: 0 },
+    responseRate: { type: Number, default: 0.9 },
   },
   { timestamps: true }
 );
