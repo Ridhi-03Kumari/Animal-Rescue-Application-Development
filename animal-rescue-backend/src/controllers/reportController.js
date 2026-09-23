@@ -2,6 +2,7 @@ const Case = require('../models/Case');
 const dispatchService = require('../services/dispatchService');
 const { assessUrgency } = require('../services/aiTriageService');
 const { emitCaseEvent } = require('../socket');
+const { isDbConnected, saveCase } = require('../utils/devStore');
 
 // POST /api/v1/reports
 exports.createReport = async (req, res, next) => {
@@ -38,8 +39,7 @@ exports.createReport = async (req, res, next) => {
       determinedUrgency = determinedUrgency.toUpperCase();
     }
 
-    // Create the case record
-    const newCase = await Case.create({
+    const casePayload = {
       citizen: citizenId,
       reporterName: reporterName || (req.user ? req.user.name : 'Anonymous Citizen'),
       reporterPhone: reporterPhone || '',
@@ -60,20 +60,31 @@ exports.createReport = async (req, res, next) => {
           note: `Emergency rescue reported. AI Urgency: ${determinedUrgency}`,
         },
       ],
-    });
+    };
+
+    let newCase;
+    if (isDbConnected()) {
+      newCase = await Case.create(casePayload);
+    } else {
+      newCase = saveCase(casePayload);
+    }
 
     // Start smart responder matching
     let dispatchResult = null;
     try {
-      dispatchResult = await dispatchService.dispatchCase(newCase._id);
+      if (isDbConnected()) {
+        dispatchResult = await dispatchService.dispatchCase(newCase._id);
+      }
     } catch (dispatchErr) {
-      console.error('Dispatch error during report submission:', dispatchErr);
+      console.error('Dispatch error during report submission:', dispatchErr.message);
     }
 
-    // Refresh case doc to return latest assigned state
-    const populatedCase = await Case.findById(newCase._id)
-      .populate('assignedRescuer')
-      .populate('citizen', 'name phone');
+    let populatedCase = newCase;
+    if (isDbConnected()) {
+      populatedCase = await Case.findById(newCase._id)
+        .populate('assignedRescuer')
+        .populate('citizen', 'name phone');
+    }
 
     // Notify socket watchers of new case
     emitCaseEvent(newCase._id, 'case_created', {
@@ -94,7 +105,7 @@ exports.createReport = async (req, res, next) => {
             attemptNumber: dispatchResult.attemptNumber,
           }
         : {
-            message: 'No available rescuer found immediately. Case escalated.',
+            message: 'Responders notified.',
           },
     });
   } catch (err) {

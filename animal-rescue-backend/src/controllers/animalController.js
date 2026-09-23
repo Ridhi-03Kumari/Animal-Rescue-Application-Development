@@ -1,6 +1,7 @@
 const QRCode = require('qrcode');
 const Animal = require('../models/Animal');
 const Case = require('../models/Case');
+const { isDbConnected, getAnimalByCaseId, getAnimalById, saveAnimal } = require('../utils/devStore');
 
 /**
  * Generate QR code data URL for an animal record
@@ -8,7 +9,7 @@ const Case = require('../models/Case');
 async function generateQrCode(animalId, caseId) {
   const qrPayload = JSON.stringify({
     type: 'ANIMAL_RESCUE_RECORD',
-    animalId: animalId.toString(),
+    animalId: animalId ? animalId.toString() : 'mock_animal',
     caseId: caseId ? caseId.toString() : null,
     lookupUrl: `https://animalrescue.bengaluru.gov.in/animals/${animalId}`,
   });
@@ -27,16 +28,20 @@ async function generateQrCode(animalId, caseId) {
 exports.listAnimals = async (req, res, next) => {
   try {
     const { status, animalType } = req.query;
-    const filter = {};
 
-    if (status) filter.status = status;
-    if (animalType) filter.animalType = animalType.toLowerCase();
+    if (isDbConnected()) {
+      const filter = {};
+      if (status) filter.status = status;
+      if (animalType) filter.animalType = animalType.toLowerCase();
 
-    const animals = await Animal.find(filter)
-      .sort({ rescueDate: -1 })
-      .populate('caseId', 'reporterName location urgency status');
+      const animals = await Animal.find(filter)
+        .sort({ rescueDate: -1 })
+        .populate('caseId', 'reporterName location urgency status');
 
-    res.json({ success: true, count: animals.length, animals });
+      return res.json({ success: true, count: animals.length, animals });
+    }
+
+    res.json({ success: true, count: 0, animals: [] });
   } catch (err) {
     next(err);
   }
@@ -45,7 +50,13 @@ exports.listAnimals = async (req, res, next) => {
 // GET /api/v1/animals/:id
 exports.getAnimalById = async (req, res, next) => {
   try {
-    const animal = await Animal.findById(req.params.id).populate('caseId');
+    let animal;
+    if (isDbConnected()) {
+      animal = await Animal.findById(req.params.id).populate('caseId');
+    } else {
+      animal = getAnimalById(req.params.id);
+    }
+
     if (!animal) {
       return res.status(404).json({ error: 'Animal record not found' });
     }
@@ -59,7 +70,13 @@ exports.getAnimalById = async (req, res, next) => {
 // GET /api/v1/animals/case/:caseId
 exports.getAnimalByCaseId = async (req, res, next) => {
   try {
-    const animal = await Animal.findOne({ caseId: req.params.caseId }).populate('caseId');
+    let animal;
+    if (isDbConnected()) {
+      animal = await Animal.findOne({ caseId: req.params.caseId }).populate('caseId');
+    } else {
+      animal = getAnimalByCaseId(req.params.caseId);
+    }
+
     if (!animal) {
       return res.status(404).json({ error: 'No animal record linked to this case' });
     }
@@ -75,17 +92,20 @@ exports.lookupByQr = async (req, res, next) => {
   try {
     const { identifier } = req.params;
 
-    // Search by Animal ID or Case ID
     let animal = null;
-    if (identifier.match(/^[0-9a-fA-F]{24}$/)) {
-      animal = await Animal.findById(identifier).populate('caseId');
-      if (!animal) {
-        animal = await Animal.findOne({ caseId: identifier }).populate('caseId');
+    if (isDbConnected()) {
+      if (identifier.match(/^[0-9a-fA-F]{24}$/)) {
+        animal = await Animal.findById(identifier).populate('caseId');
+        if (!animal) {
+          animal = await Animal.findOne({ caseId: identifier }).populate('caseId');
+        }
       }
-    }
 
-    if (!animal) {
-      animal = await Animal.findOne({ qrCodeUrl: { $regex: identifier, $options: 'i' } }).populate('caseId');
+      if (!animal) {
+        animal = await Animal.findOne({ qrCodeUrl: { $regex: identifier, $options: 'i' } }).populate('caseId');
+      }
+    } else {
+      animal = getAnimalById(identifier) || getAnimalByCaseId(identifier);
     }
 
     if (!animal) {
@@ -139,7 +159,7 @@ exports.createAnimalProfile = async (req, res, next) => {
       });
     }
 
-    const animal = new Animal({
+    const payload = {
       caseId,
       animalType: animalType.toLowerCase().trim(),
       name: name || '',
@@ -150,13 +170,22 @@ exports.createAnimalProfile = async (req, res, next) => {
       medicalNotes: medicalNotes || '',
       treatment: treatment || '',
       status: status || 'in_treatment',
-    });
+    };
 
-    const qrData = await generateQrCode(animal._id, caseId);
-    animal.qrCodeData = qrData;
-    animal.qrCodeUrl = `https://animalrescue.bengaluru.gov.in/animals/${animal._id}`;
-
-    await animal.save();
+    let animal;
+    if (isDbConnected()) {
+      animal = new Animal(payload);
+      animal.qrCodeData = await generateQrCode(animal._id, caseId);
+      animal.qrCodeUrl = `https://animalrescue.bengaluru.gov.in/animals/${animal._id}`;
+      await animal.save();
+    } else {
+      const qrData = await generateQrCode(caseId, caseId);
+      animal = saveAnimal({
+        ...payload,
+        qrCodeData: qrData,
+        qrCodeUrl: `https://animalrescue.bengaluru.gov.in/animals/${caseId}`,
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -171,14 +200,7 @@ exports.createAnimalProfile = async (req, res, next) => {
 // PATCH /api/v1/animals/:id
 exports.updateAnimalProfile = async (req, res, next) => {
   try {
-    const {
-      name,
-      photos,
-      identifyingMarkings,
-      medicalNotes,
-      treatment,
-      status,
-    } = req.body;
+    const { name, photos, identifyingMarkings, medicalNotes, treatment, status } = req.body;
 
     const validStatuses = ['in_treatment', 'sheltered', 'adopted', 'released', 'deceased'];
     if (status && !validStatuses.includes(status)) {
@@ -187,25 +209,27 @@ exports.updateAnimalProfile = async (req, res, next) => {
       });
     }
 
-    const animal = await Animal.findById(req.params.id);
-    if (!animal) {
-      return res.status(404).json({ error: 'Animal record not found' });
+    let animal;
+    if (isDbConnected()) {
+      animal = await Animal.findById(req.params.id);
+      if (!animal) return res.status(404).json({ error: 'Animal record not found' });
+
+      if (name !== undefined) animal.name = name;
+      if (photos !== undefined) animal.photos = photos;
+      if (identifyingMarkings !== undefined) animal.identifyingMarkings = identifyingMarkings;
+      if (medicalNotes !== undefined) animal.medicalNotes = medicalNotes;
+      if (treatment !== undefined) animal.treatment = treatment;
+      if (status !== undefined) animal.status = status;
+
+      if (!animal.qrCodeData) {
+        animal.qrCodeData = await generateQrCode(animal._id, animal.caseId);
+      }
+      await animal.save();
+    } else {
+      animal = getAnimalById(req.params.id);
+      if (!animal) return res.status(404).json({ error: 'Animal record not found' });
+      Object.assign(animal, { name, photos, identifyingMarkings, medicalNotes, treatment, status });
     }
-
-    if (name !== undefined) animal.name = name;
-    if (photos !== undefined) animal.photos = photos;
-    if (identifyingMarkings !== undefined) animal.identifyingMarkings = identifyingMarkings;
-    if (medicalNotes !== undefined) animal.medicalNotes = medicalNotes;
-    if (treatment !== undefined) animal.treatment = treatment;
-    if (status !== undefined) animal.status = status;
-
-    // Ensure QR code is generated if missing
-    if (!animal.qrCodeData) {
-      animal.qrCodeData = await generateQrCode(animal._id, animal.caseId);
-      animal.qrCodeUrl = `https://animalrescue.bengaluru.gov.in/animals/${animal._id}`;
-    }
-
-    await animal.save();
 
     res.json({
       success: true,

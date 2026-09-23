@@ -6,6 +6,7 @@ const tests = [
   'tests/aiTriage.test.js',
   'tests/animalsAndQR.test.js',
   'tests/contacts.test.js',
+  'tests/simulateEndToEnd.test.js',
 ];
 
 console.log('====================================================');

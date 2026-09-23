@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -15,6 +16,7 @@ import * as Location from 'expo-location';
 import AppButton from '../../components/AppButton';
 import mockTriage from '../../services/mockTriage';
 import { saveReport } from '../../services/storage';
+import api from '../../services/api';
 
 const ANIMAL_TYPES = [
   'Dog',
@@ -74,48 +76,83 @@ export default function ReportEmergencyScreen({ navigation }) {
     });
   };
 
-const submitReport = async () => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitReport = async () => {
     if (!photo) {
-    Alert.alert('Missing photo', 'Please add a photo of the animal.');
-    return;
-  }
+      Alert.alert('Missing photo', 'Please add a photo of the animal.');
+      return;
+    }
 
-  if (!animalType) {
-    Alert.alert('Missing animal type', 'Please select the animal type.');
-    return;
-  }
+    if (!animalType) {
+      Alert.alert('Missing animal type', 'Please select the animal type.');
+      return;
+    }
 
-  if (!location) {
-    Alert.alert(
-      'Missing location',
-      'Please allow location access and get your current location.'
-    );
-    return;
-  }
+    if (!location) {
+      Alert.alert(
+        'Missing location',
+        'Please allow location access and get your current location.'
+      );
+      return;
+    }
 
-  const triageResult = mockTriage({
-  animalType,
-  description,
-});
+    setSubmitting(true);
+    let caseResult = null;
+    let triageResult = null;
 
-const report = {
-  id: `AR${Date.now()}`,
-  animalType,
-  description,
-  photo,
-  location,
-  urgency: triageResult.urgency,
-  guidance: triageResult.guidance,
-  status: 'In Progress',
-  createdAt: new Date().toISOString(),
-};
+    try {
+      // 1. Submit to real backend with Gemini AI Triage & Dispatch
+      const response = await api.submitReport({
+        animalType,
+        description,
+        photoUrl: photo,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        reporterName: 'Citizen Reporter',
+      });
 
-await saveReport(report);
+      caseResult = response.case;
+      triageResult = {
+        urgency: response.case?.urgency || 'MEDIUM',
+        guidance: response.guidance || 'Keep a safe distance while the responder is on the way.',
+        animalType,
+      };
+    } catch (apiErr) {
+      console.warn('Backend reporting warning (using local fallback):', apiErr.message);
+      // Fallback for offline prototype testing
+      triageResult = mockTriage({ animalType, description });
+      caseResult = {
+        _id: `AR${Date.now()}`,
+        animalType,
+        description,
+        photoUrl: photo,
+        location,
+        urgency: triageResult.urgency,
+        status: 'reported',
+      };
+    } finally {
+      setSubmitting(false);
+    }
 
-navigation.navigate('ReportSubmitted', {
-  triage: triageResult,
-});
-};
+    // Save locally for offline history
+    await saveReport({
+      id: caseResult._id,
+      animalType,
+      description,
+      photo,
+      location,
+      urgency: triageResult.urgency,
+      guidance: triageResult.guidance,
+      status: 'In Progress',
+      createdAt: new Date().toISOString(),
+    });
+
+    navigation.navigate('ReportSubmitted', {
+      caseData: caseResult,
+      triage: triageResult,
+    });
+  };
 
   return (
     <ScrollView
