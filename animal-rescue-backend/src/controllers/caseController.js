@@ -2,6 +2,8 @@ const Case = require('../models/Case');
 const Rescuer = require('../models/Rescuer');
 const Animal = require('../models/Animal');
 const notificationService = require('../services/notificationService');
+const { generateQrCode } = require('./animalController');
+const { emitCaseEvent } = require('../socket');
 
 // GET /api/v1/cases/:id
 exports.getCaseById = async (req, res, next) => {
@@ -104,6 +106,8 @@ exports.updateCaseStatus = async (req, res, next) => {
       updatedBy: req.user ? req.user.id : null,
     });
 
+    let generatedAnimal = null;
+
     // If completed or cancelled, free the rescuer
     if (status === 'completed' || status === 'cancelled') {
       if (caseDoc.assignedRescuer) {
@@ -116,10 +120,10 @@ exports.updateCaseStatus = async (req, res, next) => {
 
       // If completed, generate/record permanent Animal profile post-rescue
       if (status === 'completed') {
-        const existingAnimal = await Animal.findOne({ caseId: caseDoc._id });
+        let existingAnimal = await Animal.findOne({ caseId: caseDoc._id });
         if (!existingAnimal) {
-          const qrUrl = `https://animalrescue.org/animals/qr/${caseDoc._id}`;
-          await Animal.create({
+          const qrUrl = `https://animalrescue.bengaluru.gov.in/animals/${caseDoc._id}`;
+          existingAnimal = new Animal({
             caseId: caseDoc._id,
             animalType: caseDoc.animalType,
             photos: caseDoc.photoUrl ? [caseDoc.photoUrl] : [],
@@ -130,11 +134,29 @@ exports.updateCaseStatus = async (req, res, next) => {
             status: 'in_treatment',
             qrCodeUrl: qrUrl,
           });
+
+          // Generate actual scannable QR Code Data URL
+          try {
+            existingAnimal.qrCodeData = await generateQrCode(existingAnimal._id, caseDoc._id);
+          } catch (qrErr) {
+            console.error('QR code generation failed:', qrErr);
+          }
+
+          await existingAnimal.save();
         }
+        generatedAnimal = existingAnimal;
       }
     }
 
     await caseDoc.save();
+
+    // Broadcast live event to all connected citizen/coordinator clients via Socket.IO
+    emitCaseEvent(caseDoc._id, 'case_status', {
+      status,
+      note: note || `Status changed to ${status}`,
+      case: caseDoc,
+      animal: generatedAnimal,
+    });
 
     // Send citizen notification
     await notificationService.notifyCitizenStatusUpdate(caseDoc, `Case is now ${status}`);
@@ -143,6 +165,7 @@ exports.updateCaseStatus = async (req, res, next) => {
       success: true,
       message: `Case status updated to ${status}`,
       case: caseDoc,
+      animal: generatedAnimal,
     });
   } catch (err) {
     next(err);

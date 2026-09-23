@@ -90,8 +90,34 @@ async function seed() {
       );
     }
 
-    console.log('✅ Demo rescuers seeded successfully in Bengaluru!');
-    console.log('Sample login: phone: 9876543210, password: rescuer123');
+    // Seed Demo Coordinator
+    const coordinatorPhone = '9999999999';
+    let coordinator = await User.findOne({ phone: coordinatorPhone });
+    if (!coordinator) {
+      await User.create({
+        name: 'Bengaluru Animal Rescue Coordinator',
+        phone: coordinatorPhone,
+        passwordHash: defaultPassword,
+        role: 'coordinator',
+      });
+    }
+
+    // Seed Demo Citizen
+    const citizenPhone = '9888888888';
+    let citizen = await User.findOne({ phone: citizenPhone });
+    if (!citizen) {
+      await User.create({
+        name: 'Aarav Patel (Citizen)',
+        phone: citizenPhone,
+        passwordHash: defaultPassword,
+        role: 'citizen',
+      });
+    }
+
+    console.log('✅ Demo rescuers, citizen, and coordinator seeded successfully in Bengaluru!');
+    console.log('Sample Rescuer login:    phone: 9876543210, password: rescuer123');
+    console.log('Sample Coordinator login: phone: 9999999999, password: rescuer123');
+    console.log('Sample Citizen login:     phone: 9888888888, password: rescuer123');
     process.exit(0);
   } catch (err) {
     console.error('❌ Seeding failed:', err);

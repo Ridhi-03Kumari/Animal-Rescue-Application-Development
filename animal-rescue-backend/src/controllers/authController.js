@@ -19,8 +19,8 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ error: 'name, phone, password and role are required' });
     }
 
-    if (!['citizen', 'rescuer'].includes(role)) {
-      return res.status(400).json({ error: 'role must be citizen or rescuer' });
+    if (!['citizen', 'rescuer', 'coordinator', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'role must be citizen, rescuer, coordinator, or admin' });
     }
 
     const existingUser = await User.findOne({ phone });
