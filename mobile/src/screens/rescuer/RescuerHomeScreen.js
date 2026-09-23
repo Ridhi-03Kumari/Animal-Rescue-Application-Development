@@ -11,9 +11,42 @@ import {
 } from 'react-native';
 import api from '../../services/api';
 
+const SAMPLE_CASES = [
+  {
+    _id: '66f001122334455667788001',
+    animalType: 'dog',
+    description: 'Street dog hit by scooter on 100ft Road, limping and bleeding from hind leg',
+    urgency: 'HIGH',
+    status: 'assigned',
+    location: {
+      latitude: 12.9784,
+      longitude: 77.6408,
+      address: '100 Feet Rd, Indiranagar, Bengaluru',
+    },
+    reporterName: 'Ananya Sharma',
+    reporterPhone: '9876543210',
+    createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
+  },
+  {
+    _id: '66f001122334455667788002',
+    animalType: 'cat',
+    description: 'Kitten stuck in stormwater drain pipe, crying and unable to climb out',
+    urgency: 'MEDIUM',
+    status: 'assigned',
+    location: {
+      latitude: 12.9352,
+      longitude: 77.6245,
+      address: '5th Block, Koramangala, Bengaluru',
+    },
+    reporterName: 'Vikram Rao',
+    reporterPhone: '9845012345',
+    createdAt: new Date(Date.now() - 25 * 60000).toISOString(),
+  },
+];
+
 export default function RescuerHomeScreen({ navigation }) {
   const [isAvailable, setIsAvailable] = useState(true);
-  const [cases, setCases] = useState([]);
+  const [cases, setCases] = useState(SAMPLE_CASES);
   const [activeCase, setActiveCase] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -28,7 +61,7 @@ export default function RescuerHomeScreen({ navigation }) {
 
       // Deduplicate by _id
       const unique = Array.from(new Map(allOpen.map((c) => [c._id, c])).values());
-      setCases(unique);
+      setCases(unique.length > 0 ? unique : SAMPLE_CASES);
 
       // Check for in-progress active case
       const activeRes = await api.getAllCases();
@@ -39,7 +72,8 @@ export default function RescuerHomeScreen({ navigation }) {
       );
       setActiveCase(inProgress || null);
     } catch (err) {
-      console.warn('Error loading rescue cases:', err.message);
+      console.warn('Error loading rescue cases, using sample alerts:', err.message);
+      setCases(SAMPLE_CASES);
     } finally {
       setLoading(false);
       setRefreshing(false);

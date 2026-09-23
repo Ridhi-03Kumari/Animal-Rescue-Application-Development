@@ -9,6 +9,62 @@ const mongoose = require('mongoose');
 const casesMap = new Map();
 const animalsMap = new Map();
 
+// Seed initial realistic emergency alerts for demo
+function seedInitialDemoCases() {
+  if (casesMap.size === 0) {
+    const demo1 = {
+      _id: '66f001122334455667788001',
+      animalType: 'dog',
+      description: 'Street dog hit by scooter on 100ft Road, limping and bleeding from hind leg',
+      urgency: 'HIGH',
+      status: 'assigned',
+      location: {
+        latitude: 12.9784,
+        longitude: 77.6408,
+        address: '100 Feet Rd, Indiranagar, Bengaluru',
+      },
+      reporterName: 'Ananya Sharma',
+      reporterPhone: '9876543210',
+      createdAt: new Date(Date.now() - 10 * 60000),
+      timeline: [
+        {
+          status: 'reported',
+          timestamp: new Date(Date.now() - 10 * 60000),
+          note: 'Emergency reported by citizen. AI Urgency: HIGH',
+        },
+      ],
+    };
+
+    const demo2 = {
+      _id: '66f001122334455667788002',
+      animalType: 'cat',
+      description: 'Kitten stuck in stormwater drain pipe, crying and unable to climb out',
+      urgency: 'MEDIUM',
+      status: 'assigned',
+      location: {
+        latitude: 12.9352,
+        longitude: 77.6245,
+        address: '5th Block, Koramangala, Bengaluru',
+      },
+      reporterName: 'Vikram Rao',
+      reporterPhone: '9845012345',
+      createdAt: new Date(Date.now() - 25 * 60000),
+      timeline: [
+        {
+          status: 'reported',
+          timestamp: new Date(Date.now() - 25 * 60000),
+          note: 'Emergency reported by citizen. AI Urgency: MEDIUM',
+        },
+      ],
+    };
+
+    casesMap.set(demo1._id, { ...demo1, toObject: () => demo1 });
+    casesMap.set(demo2._id, { ...demo2, toObject: () => demo2 });
+  }
+}
+
+seedInitialDemoCases();
+
 function isDbConnected() {
   return mongoose.connection.readyState === 1;
 }
