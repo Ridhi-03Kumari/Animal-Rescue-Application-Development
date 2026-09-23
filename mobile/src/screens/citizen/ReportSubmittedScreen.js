@@ -49,8 +49,12 @@ export default function ReportSubmittedScreen({ navigation, route }) {
             )}
         <TouchableOpacity
             style={styles.trackButton}
-            onPress={() => navigation.navigate('CaseTracking')}
-            >
+            onPress={() =>
+              navigation.navigate('CaseTracking', {
+                caseId: route?.params?.caseData?._id,
+              })
+            }
+          >
             <Text style={styles.trackButtonText}>
                 View Case Tracking
             </Text>
