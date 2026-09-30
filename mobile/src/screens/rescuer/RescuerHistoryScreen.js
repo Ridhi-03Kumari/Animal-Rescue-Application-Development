@@ -115,6 +115,9 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 45,
     paddingBottom: 40,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   topBar: {
     flexDirection: 'row',
@@ -202,14 +205,16 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   qrBtn: {
-    backgroundColor: '#DCE9E3',
-    paddingVertical: 10,
+    backgroundColor: '#E2EFE9',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderRadius: 8,
-    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   qrBtnText: {
-    color: '#2F5D50',
-    fontSize: 13,
+    color: '#1E4D3E',
+    fontSize: 12,
     fontWeight: '700',
   },
 });

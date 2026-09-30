@@ -16,6 +16,7 @@ import * as Location from 'expo-location';
 import AppButton from '../../components/AppButton';
 import mockTriage from '../../services/mockTriage';
 import { saveReport } from '../../services/storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../services/api';
 
 const ANIMAL_TYPES = [
@@ -57,23 +58,27 @@ export default function ReportEmergencyScreen({ navigation }) {
   };
 
   const getLocation = async () => {
-    const permission =
-      await Location.requestForegroundPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(
-        'Permission needed',
-        'Please allow location access to report the animal location.'
-      );
-      return;
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        setLocation({
+          latitude: 12.9716,
+          longitude: 77.5946,
+        });
+        return;
+      }
+      const currentLocation = await Location.getCurrentPositionAsync({});
+      setLocation({
+        latitude: currentLocation.coords.latitude,
+        longitude: currentLocation.coords.longitude,
+      });
+    } catch (e) {
+      console.log('Using default Bengaluru location:', e.message);
+      setLocation({
+        latitude: 12.9716,
+        longitude: 77.5946,
+      });
     }
-
-    const currentLocation = await Location.getCurrentPositionAsync({});
-
-    setLocation({
-      latitude: currentLocation.coords.latitude,
-      longitude: currentLocation.coords.longitude,
-    });
   };
 
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +107,17 @@ export default function ReportEmergencyScreen({ navigation }) {
     let triageResult = null;
 
     try {
+      let reporterName = 'Citizen Reporter';
+      let reporterPhone = '';
+      try {
+        const stored = await AsyncStorage.getItem('user_profile');
+        if (stored) {
+          const u = JSON.parse(stored);
+          reporterName = u.name || reporterName;
+          reporterPhone = u.phone || reporterPhone;
+        }
+      } catch (e) {}
+
       // 1. Submit to real backend with Gemini AI Triage & Dispatch
       const response = await api.submitReport({
         animalType,
@@ -109,7 +125,8 @@ export default function ReportEmergencyScreen({ navigation }) {
         photoUrl: photo,
         latitude: location.latitude,
         longitude: location.longitude,
-        reporterName: 'Citizen Reporter',
+        reporterName,
+        reporterPhone,
       });
 
       caseResult = response.case;
@@ -257,6 +274,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 24,
     paddingBottom: 40,
+    maxWidth: 620,
+    width: '100%',
+    alignSelf: 'center',
   },
 
   title: {

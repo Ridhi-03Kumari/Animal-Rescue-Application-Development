@@ -61,22 +61,10 @@ export default function ActiveRescueScreen({ route, navigation }) {
       setCaseData(res.case);
 
       if (newStatus === 'completed') {
-        Alert.alert(
-          'Rescue Completed!',
-          'Permanent digital animal profile has been generated with a scannable QR code.',
-          [
-            {
-              text: 'View Animal QR Profile',
-              onPress: () =>
-                navigation.navigate('AnimalQr', {
-                  caseId,
-                  animal: res.animal,
-                }),
-            },
-          ]
-        );
-      } else {
-        Alert.alert('Status Updated', `Status changed to "${newStatus.replace(/_/g, ' ')}". Citizen notified.`);
+        navigation.navigate('AnimalQr', {
+          caseId,
+          animal: res.animal,
+        });
       }
     } catch (err) {
       Alert.alert('Update Failed', err.message);
@@ -266,6 +254,9 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 45,
     paddingBottom: 50,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   center: {
     flex: 1,
@@ -465,26 +456,32 @@ const styles = StyleSheet.create({
   },
   completeBigBtn: {
     backgroundColor: '#2E7D32',
-    paddingVertical: 15,
+    paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
     marginBottom: 20,
+    maxWidth: 380,
+    width: '100%',
+    alignSelf: 'center',
   },
   completeBigBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   viewQrBtn: {
     backgroundColor: '#2F5D50',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
     marginBottom: 20,
+    maxWidth: 380,
+    width: '100%',
+    alignSelf: 'center',
   },
   viewQrBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   backBtn: {

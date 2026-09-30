@@ -1,8 +1,9 @@
 import { Platform } from 'react-native';
 
-// In Android emulator, 10.0.2.2 maps to the host machine's localhost
-// In iOS simulator or web, localhost works directly
-const DEFAULT_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// For mobile devices (Expo Go on phone), use PC's Wi-Fi LAN IP so the phone can reach the backend.
+// For Web in browser, use localhost.
+const LAN_IP = '10.110.153.199';
+const DEFAULT_HOST = Platform.OS === 'web' ? 'localhost' : LAN_IP;
 export const API_BASE_URL = `http://${DEFAULT_HOST}:5000/api/v1`;
 
 /**
@@ -42,6 +43,18 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  // 0. Authentication
+  login: (phone, password) =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ phone, password }),
+    }),
+  register: (userData) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    }),
+
   // 1. Health check
   checkHealth: () => request('/health'),
 

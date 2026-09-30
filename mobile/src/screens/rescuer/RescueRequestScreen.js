@@ -43,47 +43,24 @@ export default function RescueRequestScreen({ route, navigation }) {
     setActing(true);
     try {
       await api.acceptCase(caseItem._id);
-      Alert.alert(
-        'Rescue Accepted! 🚗',
-        'Live tracking is now active. Navigating to active rescue.',
-        [
-          {
-            text: 'Start Rescue',
-            onPress: () => navigation.replace('ActiveRescue', { caseId: caseItem._id }),
-          },
-        ]
-      );
     } catch (err) {
-      // In offline/dev mode, proceed to active rescue
-      navigation.replace('ActiveRescue', { caseId: caseItem._id });
+      console.log('Proceeding to active rescue:', err.message);
     } finally {
       setActing(false);
+      navigation.replace('ActiveRescue', { caseId: caseItem._id });
     }
   };
 
-  const handleDecline = () => {
-    Alert.alert(
-      'Decline Rescue Alert?',
-      'This emergency will be immediately escalated to the next suitable responder in Bengaluru.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm Decline',
-          style: 'destructive',
-          onPress: async () => {
-            setActing(true);
-            try {
-              await api.declineCase(caseItem._id, null, 'Rescuer busy/declined');
-            } catch (e) {
-              console.log('Decline notification sent');
-            } finally {
-              setActing(false);
-              navigation.goBack();
-            }
-          },
-        },
-      ]
-    );
+  const handleDecline = async () => {
+    setActing(true);
+    try {
+      await api.declineCase(caseItem._id, null, 'Rescuer busy/declined');
+    } catch (e) {
+      console.log('Decline notification sent:', e.message);
+    } finally {
+      setActing(false);
+      navigation.goBack();
+    }
   };
 
   return (

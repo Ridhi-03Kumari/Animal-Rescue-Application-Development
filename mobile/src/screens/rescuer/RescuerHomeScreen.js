@@ -89,52 +89,35 @@ export default function RescuerHomeScreen({ navigation }) {
     fetchCases();
   };
 
+  const [actingCaseId, setActingCaseId] = useState(null);
+
   const handleAccept = async (caseItem) => {
     try {
-      Alert.alert(
-        'Accept Rescue',
-        `Accept rescue for ${caseItem.animalType.toUpperCase()}? Live tracking will begin.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Accept',
-            style: 'default',
-            onPress: async () => {
-              try {
-                await api.acceptCase(caseItem._id);
-              } catch (e) {
-                console.log('Proceeding to active rescue');
-              }
-              navigation.navigate('ActiveRescue', { caseId: caseItem._id });
-            },
-          },
-        ]
-      );
+      setActingCaseId(caseItem._id);
+      try {
+        await api.acceptCase(caseItem._id);
+      } catch (e) {
+        console.log('Proceeding to active rescue:', e.message);
+      }
+      navigation.navigate('ActiveRescue', { caseId: caseItem._id });
     } catch (err) {
-      Alert.alert('Error', err.message);
+      console.warn('Accept error:', err.message);
+      navigation.navigate('ActiveRescue', { caseId: caseItem._id });
+    } finally {
+      setActingCaseId(null);
     }
   };
 
   const handleDecline = async (caseItem) => {
     try {
-      Alert.alert(
-        'Decline Rescue',
-        'Decline this case? It will be immediately escalated to the next responder.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Decline',
-            style: 'destructive',
-            onPress: async () => {
-              await api.declineCase(caseItem._id, null, 'Rescuer unavailable in area');
-              Alert.alert('Case Declined', 'Escalated to next responder.');
-              fetchCases();
-            },
-          },
-        ]
-      );
+      setActingCaseId(caseItem._id);
+      await api.declineCase(caseItem._id, null, 'Rescuer unavailable in area');
+      fetchCases();
     } catch (err) {
-      Alert.alert('Error', err.message);
+      console.warn('Decline error:', err.message);
+      fetchCases();
+    } finally {
+      setActingCaseId(null);
     }
   };
 
@@ -176,8 +159,15 @@ export default function RescuerHomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Navigation Quick Links (Profile & History) */}
+      {/* Navigation Quick Links (Profile, History, Switch View, Roles) */}
       <View style={styles.navRow}>
+        <TouchableOpacity
+          style={styles.navChip}
+          onPress={() => navigation.navigate('CitizenHome')}
+        >
+          <Text style={styles.navChipText}>⇄ Citizen View</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.navChip}
           onPress={() => navigation.navigate('RescuerProfile')}
@@ -189,14 +179,21 @@ export default function RescuerHomeScreen({ navigation }) {
           style={styles.navChip}
           onPress={() => navigation.navigate('RescuerHistory')}
         >
-          <Text style={styles.navChipText}>📜 Case History</Text>
+          <Text style={styles.navChipText}>📜 History</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.navChip}
-          onPress={() => navigation.navigate('CitizenHome')}
+          onPress={() => navigation.navigate('Auth', { role: 'rescuer' })}
         >
-          <Text style={styles.navChipText}>⇄ Citizen View</Text>
+          <Text style={styles.navChipText}>🔐 Login</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navChip}
+          onPress={() => navigation.navigate('Welcome')}
+        >
+          <Text style={styles.navChipText}>⌂ Roles</Text>
         </TouchableOpacity>
       </View>
 
@@ -221,7 +218,7 @@ export default function RescuerHomeScreen({ navigation }) {
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Incoming Emergency Alerts ({cases.length})</Text>
         <TouchableOpacity onPress={fetchCases}>
-          <Text style={styles.refreshText}>Refresh</Text>
+          <Text style={styles.refreshText}>↻ Refresh</Text>
         </TouchableOpacity>
       </View>
 
@@ -238,6 +235,7 @@ export default function RescuerHomeScreen({ navigation }) {
       ) : (
         cases.map((c) => {
           const badge = getUrgencyBadge(c.urgency);
+          const isActing = actingCaseId === c._id;
           return (
             <TouchableOpacity
               key={c._id}
@@ -261,7 +259,7 @@ export default function RescuerHomeScreen({ navigation }) {
               ) : null}
 
               <Text style={styles.location}>
-                📍 {c.location?.address || `${c.location?.latitude.toFixed(4)}, ${c.location?.longitude.toFixed(4)}`}
+                📍 {c.location?.address || `${c.location?.latitude?.toFixed(4)}, ${c.location?.longitude?.toFixed(4)}`}
               </Text>
 
               <Text style={styles.reporterInfo}>
@@ -273,6 +271,7 @@ export default function RescuerHomeScreen({ navigation }) {
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.declineBtn]}
                   onPress={() => handleDecline(c)}
+                  disabled={isActing}
                 >
                   <Text style={styles.declineText}>Decline</Text>
                 </TouchableOpacity>
@@ -280,8 +279,13 @@ export default function RescuerHomeScreen({ navigation }) {
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.acceptBtn]}
                   onPress={() => handleAccept(c)}
+                  disabled={isActing}
                 >
-                  <Text style={styles.acceptText}>Accept Rescue</Text>
+                  {isActing ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.acceptText}>Accept Rescue</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -301,6 +305,9 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 45,
     paddingBottom: 40,
+    maxWidth: 680,
+    width: '100%',
+    alignSelf: 'center',
   },
   topHeader: {
     flexDirection: 'row',

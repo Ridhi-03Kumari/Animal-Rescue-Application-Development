@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // Shared
 import WelcomeScreen from '../screens/shared/WelcomeScreen';
+import AuthScreen from '../screens/shared/AuthScreen';
 
 // Citizen Screens
 import CitizenHomeScreen from '../screens/citizen/CitizenHomeScreen';
@@ -29,6 +30,7 @@ export default function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {/* Entry Role Selection */}
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
+        <Stack.Screen name="Auth" component={AuthScreen} />
 
         {/* Citizen Flow */}
         <Stack.Screen name="CitizenHome" component={CitizenHomeScreen} />

@@ -8,6 +8,46 @@ const mongoose = require('mongoose');
 
 const casesMap = new Map();
 const animalsMap = new Map();
+const usersMap = new Map();
+const rescuersMap = new Map();
+
+// Seed initial users for demo
+const bcrypt = require('bcryptjs');
+const defaultHash = bcrypt.hashSync('password123', 10);
+
+const demoCitizen = {
+  _id: '66f001122334455667788991',
+  name: 'Ananya Sharma',
+  phone: '9876543210',
+  passwordHash: defaultHash,
+  role: 'citizen',
+  profilePhotoUrl: '',
+};
+usersMap.set(demoCitizen.phone, demoCitizen);
+
+const demoRescuerUser = {
+  _id: '66f001122334455667788992',
+  name: 'Rajesh Kumar',
+  phone: '9845012345',
+  passwordHash: defaultHash,
+  role: 'rescuer',
+  profilePhotoUrl: '',
+};
+usersMap.set(demoRescuerUser.phone, demoRescuerUser);
+
+const demoRescuerProfile = {
+  _id: 'mock_rescuer_01',
+  user: demoRescuerUser._id,
+  organizationName: 'Bengaluru Animal Rescue Squad (BARS)',
+  animalsHandled: ['dog', 'cat', 'cattle', 'bird'],
+  available: true,
+  isVerified: true,
+  verificationStatus: 'approved',
+  activeCaseId: null,
+  completedCasesCount: 14,
+  responseRate: 0.95,
+};
+rescuersMap.set(demoRescuerUser._id, demoRescuerProfile);
 
 // Seed initial realistic emergency alerts for demo
 function seedInitialDemoCases() {
@@ -137,6 +177,44 @@ function getAnimalById(id) {
   return animalsMap.get(id ? id.toString() : '');
 }
 
+function getUserByPhone(phone) {
+  return usersMap.get(phone ? phone.toString().trim() : '');
+}
+
+function saveUser(userData) {
+  const id = userData._id ? userData._id.toString() : new mongoose.Types.ObjectId().toString();
+  const doc = {
+    ...userData,
+    _id: id,
+    createdAt: new Date(),
+    toObject: function () {
+      return this;
+    },
+  };
+  usersMap.set(userData.phone.toString().trim(), doc);
+  return doc;
+}
+
+function getRescuerByUserId(userId) {
+  return rescuersMap.get(userId ? userId.toString() : '');
+}
+
+function saveRescuer(rescuerData) {
+  const id = rescuerData._id ? rescuerData._id.toString() : new mongoose.Types.ObjectId().toString();
+  const doc = {
+    ...rescuerData,
+    _id: id,
+    available: rescuerData.available !== undefined ? rescuerData.available : true,
+    isVerified: true,
+    verificationStatus: 'approved',
+    toObject: function () {
+      return this;
+    },
+  };
+  rescuersMap.set(rescuerData.user.toString(), doc);
+  return doc;
+}
+
 module.exports = {
   isDbConnected,
   saveCase,
@@ -146,6 +224,12 @@ module.exports = {
   saveAnimal,
   getAnimalByCaseId,
   getAnimalById,
+  getUserByPhone,
+  saveUser,
+  getRescuerByUserId,
+  saveRescuer,
   casesMap,
   animalsMap,
+  usersMap,
+  rescuersMap,
 };

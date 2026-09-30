@@ -1,120 +1,272 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ImageBackground,
+  Dimensions,
+  ScrollView,
+} from 'react-native';
+
+const HERO_BG = require('../../../assets/rescue_hero_bg.jpg');
 
 export default function WelcomeScreen({ navigation }) {
   return (
-    <View style={styles.container}>
-      <View style={styles.badgeContainer}>
-        <Text style={styles.badgeText}>🐾 BENGALURU RESCUE NETWORK</Text>
-      </View>
-
-      <Text style={styles.title}>
-        Animal Emergency Rescue
-      </Text>
-
-      <Text style={styles.subtitle}>
-        Instant AI triage, responder matching, and live tracking for injured animals in Bengaluru.
-      </Text>
-
-      <View style={styles.buttonContainer}>
-        {/* Citizen Button */}
-        <TouchableOpacity
-          style={styles.citizenBtn}
-          onPress={() => navigation.navigate('CitizenHome')}
+    <ImageBackground source={HERO_BG} style={styles.bgImage} resizeMode="cover">
+      <View style={styles.overlay}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.citizenBtnText}>I am a Citizen</Text>
-          <Text style={styles.btnSubtext}>Report an injured animal or view status</Text>
-        </TouchableOpacity>
+          {/* Centered Glassmorphism Card */}
+          <View style={styles.card}>
+            {/* Top Brand Badge */}
+            <View style={styles.badgeContainer}>
+              <Text style={styles.badgeText}>🐾 BENGALURU RESCUE NETWORK</Text>
+            </View>
 
-        {/* Rescuer Button */}
-        <TouchableOpacity
-          style={styles.rescuerBtn}
-          onPress={() => navigation.navigate('RescuerHome')}
-        >
-          <Text style={styles.rescuerBtnText}>I am a Rescuer / Volunteer</Text>
-          <Text style={styles.btnSubtextRescuer}>Respond to emergency alerts & track rescues</Text>
-        </TouchableOpacity>
+            <Text style={styles.title}>Animal Emergency Rescue</Text>
+
+            <Text style={styles.subtitle}>
+              Instant AI triage, responder matching, and live tracking for injured animals across Bengaluru.
+            </Text>
+
+            {/* Action Buttons Container */}
+            <View style={styles.buttonContainer}>
+              {/* Sign In / Register Button (Primary) */}
+              <TouchableOpacity
+                style={styles.primaryAuthBtn}
+                onPress={() => navigation.navigate('Auth')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.btnContentRow}>
+                  <Text style={styles.btnIcon}>🔐</Text>
+                  <View style={styles.btnTextGroup}>
+                    <Text style={styles.primaryBtnTitle}>Sign In / Create Profile</Text>
+                    <Text style={styles.primaryBtnSub}>Citizen tracking & rescuer capability profile</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {/* Elegant Divider */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>QUICK ACCESS</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Citizen Button */}
+              <TouchableOpacity
+                style={styles.citizenBtn}
+                onPress={() => navigation.navigate('CitizenHome')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.btnContentRow}>
+                  <Text style={styles.btnIcon}>👤</Text>
+                  <View style={styles.btnTextGroup}>
+                    <Text style={styles.citizenBtnTitle}>I am a Citizen</Text>
+                    <Text style={styles.citizenBtnSub}>Report an injured animal or view status</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {/* Rescuer Button */}
+              <TouchableOpacity
+                style={styles.rescuerBtn}
+                onPress={() => navigation.navigate('RescuerHome')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.btnContentRow}>
+                  <Text style={styles.btnIcon}>🚑</Text>
+                  <View style={styles.btnTextGroup}>
+                    <Text style={styles.rescuerBtnTitle}>I am a Rescuer / Volunteer</Text>
+                    <Text style={styles.rescuerBtnSub}>Respond to dispatch alerts & update rescues</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Footer Guarantee */}
+            <View style={styles.footerNote}>
+              <Text style={styles.footerText}>
+                💚 24/7 Smart Emergency Response Network for Bengaluru
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
       </View>
-    </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  bgImage: {
     flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(18, 38, 30, 0.42)',
     justifyContent: 'center',
-    padding: 24,
-    backgroundColor: '#FAFAF7',
+    alignItems: 'center',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 36,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 450,
+    backgroundColor: 'rgba(255, 254, 245, 0.76)',
+    borderRadius: 24,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    shadowColor: '#1E4D3E',
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
   },
   badgeContainer: {
     alignSelf: 'center',
-    backgroundColor: '#DCE9E3',
+    backgroundColor: '#FBECEF',
+    borderWidth: 1,
+    borderColor: '#F0CCD5',
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 4,
     borderRadius: 20,
-    marginBottom: 16,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2F5D50',
-    letterSpacing: 0.5,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: '#2F5D50',
-    textAlign: 'center',
     marginBottom: 12,
   },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#7A1E3A',
+    letterSpacing: 0.8,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1E4D3E',
+    textAlign: 'center',
+    marginBottom: 6,
+    letterSpacing: -0.3,
+  },
   subtitle: {
-    fontSize: 15,
+    fontSize: 13,
     color: '#444444',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 36,
+    lineHeight: 18,
+    marginBottom: 22,
+    paddingHorizontal: 8,
   },
   buttonContainer: {
-    gap: 16,
+    gap: 10,
   },
-  citizenBtn: {
-    backgroundColor: '#2F5D50',
-    borderRadius: 14,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    shadowColor: '#2F5D50',
-    shadowOpacity: 0.2,
+  primaryAuthBtn: {
+    backgroundColor: '#1E4D3E',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    shadowColor: '#1E4D3E',
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 3,
   },
-  citizenBtnText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 4,
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  btnSubtext: {
-    color: '#DCE9E3',
-    fontSize: 13,
+  btnIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  btnTextGroup: {
+    flex: 1,
+  },
+  primaryBtnTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  primaryBtnSub: {
+    color: '#D4E8E1',
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(122, 30, 58, 0.15)',
+  },
+  dividerText: {
+    marginHorizontal: 10,
+    fontSize: 10,
+    color: '#7A1E3A',
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  citizenBtn: {
+    backgroundColor: 'rgba(255, 251, 235, 0.92)',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderWidth: 1.5,
+    borderColor: '#E8DCB5',
+  },
+  citizenBtnTitle: {
+    color: '#1E4D3E',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  citizenBtnSub: {
+    color: '#5C6350',
+    fontSize: 11,
+    lineHeight: 14,
   },
   rescuerBtn: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#2F5D50',
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2CDD3',
   },
-  rescuerBtnText: {
-    color: '#2F5D50',
-    fontSize: 17,
+  rescuerBtnTitle: {
+    color: '#7A1E3A',
+    fontSize: 14,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 1,
   },
-  btnSubtextRescuer: {
+  rescuerBtnSub: {
     color: '#666666',
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  footerNote: {
+    marginTop: 18,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.06)',
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 11,
+    color: '#667770',
+    fontWeight: '500',
   },
 });
