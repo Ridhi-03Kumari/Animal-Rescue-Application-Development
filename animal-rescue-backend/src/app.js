@@ -13,6 +13,7 @@ const contactRoutes = require('./routes/contacts');
 const coordinatorRoutes = require('./routes/coordinator');
 const uploadRoutes = require('./routes/upload');
 const errorHandler = require('./middleware/errorHandler');
+const { isDbConnected } = require('./utils/devStore');
 
 const app = express();
 
@@ -29,6 +30,8 @@ app.get('/api/v1/health', (req, res) => {
     status: 'ok',
     message: 'Animal Emergency Rescue & Smart Response API is running',
     city: 'Bengaluru',
+    // 'mongodb' = real database connected, 'demo' = in-memory demo store
+    database: isDbConnected() ? 'mongodb' : 'demo',
     features: [
       'smart_dispatch_scoring',
       'gemini_ai_triage',
@@ -52,7 +55,8 @@ app.use('/api/v1/contacts', contactRoutes);
 app.use('/api/v1/coordinator', coordinatorRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 
-// Keep error handler last
+// Unknown API routes -> JSON 404, then the error handler (keep both last)
+app.use('/api', errorHandler.notFound);
 app.use(errorHandler);
 
 module.exports = app;

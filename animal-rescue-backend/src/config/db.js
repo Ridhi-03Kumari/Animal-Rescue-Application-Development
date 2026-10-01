@@ -9,9 +9,12 @@ const connectDB = async () => {
     });
     console.log('✅ MongoDB connected successfully');
   } catch (err) {
+    // Without a database, fail fast instead of letting queries hang for 10s;
+    // the controllers use the in-memory store (utils/devStore.js) in this mode.
+    mongoose.set('bufferCommands', false);
     console.warn(`⚠️ MongoDB connection warning: ${err.message}`);
     console.warn(`👉 Tip: If you don't have MongoDB installed locally, paste your free MongoDB Atlas URI into animal-rescue-backend/.env`);
-    console.warn(`👉 The server is still running so you can test health, contacts, AI triage, and real-time sockets!`);
+    console.warn(`👉 Running in demo mode: data is kept in memory and saved to data/dev-store.json, so it survives restarts.`);
   }
 };
 

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../config/jwt');
 
 // Protect middleware - requires valid JWT
 const protect = (req, res, next) => {
@@ -11,7 +12,7 @@ const protect = (req, res, next) => {
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
@@ -26,7 +27,7 @@ const optionalProtect = (req, res, next) => {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+      const decoded = jwt.verify(token, JWT_SECRET);
       req.user = decoded;
     } catch (err) {
       // If invalid token provided, proceed as guest without req.user
