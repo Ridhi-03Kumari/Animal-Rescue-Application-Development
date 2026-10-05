@@ -76,6 +76,18 @@ const caseSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // Safe advice shown to the citizen (kept so a repeated submit can show the same advice)
+    guidance: {
+      type: String,
+      default: '',
+    },
+    // Sent by the app once per report form. If the same key arrives again (double tap, retry after a
+    // timeout) the existing case is returned instead of creating a duplicate.
+    clientRequestId: {
+      type: String,
+      default: undefined,
+      index: { unique: true, sparse: true },
+    },
   },
   { timestamps: true }
 );
