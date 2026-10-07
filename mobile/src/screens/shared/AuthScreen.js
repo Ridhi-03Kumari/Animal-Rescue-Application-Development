@@ -5,25 +5,27 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  ImageBackground,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../services/api';
-
-const HERO_BG = require('../../../assets/rescue_hero_bg.jpg');
+import { useSession } from '../../context/SessionContext';
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs, isSmallPhone } from '../../responsive';
 
 const ANIMAL_OPTIONS = [
-  { id: 'dog', label: '🐕 Dogs' },
-  { id: 'cat', label: '🐈 Cats' },
-  { id: 'cattle', label: '🐄 Cattle / Cows' },
-  { id: 'bird', label: '🕊️ Birds' },
-  { id: 'wildlife', label: '🐍 Wildlife / Reptiles' },
+  { id: 'dog', label: 'Dogs' },
+  { id: 'cat', label: 'Cats' },
+  { id: 'cattle', label: 'Cattle / Cows' },
+  { id: 'bird', label: 'Birds' },
+  { id: 'wildlife', label: 'Wildlife / Reptiles' },
 ];
 
 export default function AuthScreen({ navigation, route }) {
   const initialRole = route.params?.role || 'citizen';
+  const { signIn } = useSession();
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState(initialRole);
 
@@ -47,20 +49,45 @@ export default function AuthScreen({ navigation, route }) {
     }
   };
 
-  const handleDemoFill = (type) => {
+  // The demo accounts depend on the server's mode: the built-in demo store (no database) has Ananya and
+  // Rajesh, while a real MongoDB database has the accounts created by `npm run seed`.
+  const DEMO_ACCOUNTS = {
+    demo: {
+      citizen: { phone: '9876543210', password: 'password123', name: 'Ananya Sharma' },
+      rescuer: {
+        phone: '9845012345',
+        password: 'password123',
+        name: 'Rajesh Kumar',
+        organizationName: 'Bengaluru Animal Rescue Squad',
+      },
+    },
+    mongodb: {
+      citizen: { phone: '9888888888', password: 'rescuer123', name: 'Aarav Patel' },
+      rescuer: {
+        phone: '9876543210',
+        password: 'rescuer123',
+        name: 'Rahul',
+        organizationName: 'Compassion Animal Rescue',
+      },
+    },
+  };
+
+  const handleDemoFill = async (type) => {
     setErrorMsg('');
-    if (type === 'citizen') {
-      setRole('citizen');
-      setPhone('9876543210');
-      setPassword('password123');
-      setName('Ananya Sharma');
-    } else {
-      setRole('rescuer');
-      setPhone('9845012345');
-      setPassword('password123');
-      setName('Rajesh Kumar');
-      setOrganizationName('Bengaluru Animal Rescue Squad');
+    let mode = 'demo';
+    try {
+      const health = await api.checkHealth();
+      if (health.database === 'mongodb') mode = 'mongodb';
+    } catch (e) {
+      // server not reachable: fall back to the demo-mode accounts
     }
+
+    const account = DEMO_ACCOUNTS[mode][type];
+    setRole(type);
+    setPhone(account.phone);
+    setPassword(account.password);
+    setName(account.name);
+    if (type === 'rescuer') setOrganizationName(account.organizationName);
   };
 
   const handleSubmit = async () => {
@@ -93,23 +120,20 @@ export default function AuthScreen({ navigation, route }) {
         });
       }
 
-      if (res.token) {
-        await AsyncStorage.setItem('user_token', res.token);
+      if (!res.token || !res.user) {
+        throw new Error('Unexpected reply from the server. Please try again.');
       }
-      if (res.user) {
-        await AsyncStorage.setItem('user_profile', JSON.stringify(res.user));
+      if (!['citizen', 'rescuer'].includes(res.user.role)) {
+        throw new Error('This type of account is not available in the mobile app.');
+      }
+      // Signing in through the wrong door: a citizen account cannot open the rescuer side, or the reverse
+      if (isLogin && res.user.role !== role) {
+        const right = res.user.role === 'rescuer' ? 'Rescuer' : 'Citizen';
+        throw new Error(`This is a ${res.user.role} account. Choose "${right}" above and sign in again.`);
       }
 
-      const activeRole = res.user?.role || role;
-      setSuccessMsg(isLogin ? 'Login successful!' : 'Account created successfully!');
-
-      setTimeout(() => {
-        if (activeRole === 'rescuer') {
-          navigation.replace('RescuerHome');
-        } else {
-          navigation.replace('CitizenHome');
-        }
-      }, 500);
+      // Saves the login and switches the app to this role's side
+      await signIn(res.token, res.user);
     } catch (err) {
       setErrorMsg(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
@@ -117,33 +141,24 @@ export default function AuthScreen({ navigation, route }) {
     }
   };
 
-  const handleGuestContinue = () => {
-    if (role === 'rescuer') {
-      navigation.replace('RescuerHome');
-    } else {
-      navigation.replace('CitizenHome');
-    }
-  };
-
   return (
-    <ImageBackground source={HERO_BG} style={styles.bgImage} resizeMode="cover">
-      <View style={styles.overlay}>
-        <ScrollView
-          style={styles.container}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Top Brand Header */}
-          <View style={styles.header}>
-            <View style={styles.badgeContainer}>
-              <Text style={styles.badgeText}>🐾 BENGALURU RESCUE NETWORK</Text>
-            </View>
-            <Text style={styles.title}>Animal Emergency Rescue</Text>
-            <Text style={styles.subtitle}>
-              Connect citizens with swift animal responders across Bengaluru
-            </Text>
-          </View>
-
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          size="lg"
+          eyebrow="Bengaluru Rescue Network"
+          title={
+            <>
+              {isLogin ? 'Welcome ' : 'Join the '}
+              <Accent>{isLogin ? 'back' : 'rescue'}</Accent>
+            </>
+          }
+          subtitle="Connect citizens with swift animal responders across Bengaluru"
+        />
+      }
+      scroll
+      contentStyle={styles.content}
+    >
           {/* Centered Auth Card */}
           <View style={styles.card}>
         {/* Sign In vs Sign Up Tabs */}
@@ -155,7 +170,7 @@ export default function AuthScreen({ navigation, route }) {
               setErrorMsg('');
             }}
           >
-            <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign In</Text>
+            <Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={[styles.tabText, isLogin && styles.activeTabText]}>Sign In</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -165,57 +180,55 @@ export default function AuthScreen({ navigation, route }) {
               setErrorMsg('');
             }}
           >
-            <Text style={[styles.tabText, !isLogin && styles.activeTabText]}>Create Account</Text>
+            <Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={[styles.tabText, !isLogin && styles.activeTabText]}>Create Account</Text>
           </TouchableOpacity>
         </View>
 
         {/* Role Selector */}
-        <Text style={styles.sectionLabel}>Select Your Role:</Text>
+        <Text maxFontSizeMultiplier={1.3} style={styles.sectionLabel}>Select Your Role:</Text>
         <View style={styles.roleContainer}>
           <TouchableOpacity
             style={[styles.roleCard, role === 'citizen' && styles.roleCardActive]}
             onPress={() => setRole('citizen')}
           >
-            <Text style={styles.roleEmoji}>👤</Text>
-            <Text style={[styles.roleTitle, role === 'citizen' && styles.roleTitleActive]}>
+            <Text maxFontSizeMultiplier={1.3} style={[styles.roleTitle, role === 'citizen' && styles.roleTitleActive]}>
               Citizen
             </Text>
-            <Text style={styles.roleSub}>Report & track injured animals</Text>
+            <Text maxFontSizeMultiplier={1.3} style={[styles.roleSub, role === 'citizen' && styles.roleSubActive]}>Report & track injured animals</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.roleCard, role === 'rescuer' && styles.roleCardActive]}
             onPress={() => setRole('rescuer')}
           >
-            <Text style={styles.roleEmoji}>🚑</Text>
-            <Text style={[styles.roleTitle, role === 'rescuer' && styles.roleTitleActive]}>
+            <Text maxFontSizeMultiplier={1.3} style={[styles.roleTitle, role === 'rescuer' && styles.roleTitleActive]}>
               Rescuer
             </Text>
-            <Text style={styles.roleSub}>Respond to dispatch alerts</Text>
+            <Text maxFontSizeMultiplier={1.3} style={[styles.roleSub, role === 'rescuer' && styles.roleSubActive]}>Respond to dispatch alerts</Text>
           </TouchableOpacity>
         </View>
 
         {/* Feedback Messages */}
         {errorMsg ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>⚠️ {errorMsg}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.errorText}>{errorMsg}</Text>
           </View>
         ) : null}
 
         {successMsg ? (
           <View style={styles.successBox}>
-            <Text style={styles.successText}>✓ {successMsg}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.successText}>{successMsg}</Text>
           </View>
         ) : null}
 
         {/* Input Fields */}
         {!isLogin && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Full Name</Text>
-            <TextInput
+            <Text maxFontSizeMultiplier={1.3} style={styles.label}>Full Name</Text>
+            <TextInput maxFontSizeMultiplier={1.3}
               style={styles.input}
               placeholder="e.g. Dr. Priya Sharma"
-              placeholderTextColor="#999999"
+              placeholderTextColor={colors.soft}
               value={name}
               onChangeText={setName}
             />
@@ -223,11 +236,11 @@ export default function AuthScreen({ navigation, route }) {
         )}
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Phone Number</Text>
-          <TextInput
+          <Text maxFontSizeMultiplier={1.3} style={styles.label}>Phone Number</Text>
+          <TextInput maxFontSizeMultiplier={1.3}
             style={styles.input}
             placeholder="10-digit mobile number"
-            placeholderTextColor="#999999"
+            placeholderTextColor={colors.soft}
             keyboardType="phone-pad"
             value={phone}
             onChangeText={setPhone}
@@ -235,11 +248,11 @@ export default function AuthScreen({ navigation, route }) {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
-          <TextInput
+          <Text maxFontSizeMultiplier={1.3} style={styles.label}>Password</Text>
+          <TextInput maxFontSizeMultiplier={1.3}
             style={styles.input}
             placeholder="Enter password"
-            placeholderTextColor="#999999"
+            placeholderTextColor={colors.soft}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -250,30 +263,28 @@ export default function AuthScreen({ navigation, route }) {
         {!isLogin && role === 'rescuer' && (
           <View style={styles.rescuerSpecs}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Organization / NGO Name (Optional)</Text>
-              <TextInput
+              <Text maxFontSizeMultiplier={1.3} style={styles.label}>Organization / NGO Name (Optional)</Text>
+              <TextInput maxFontSizeMultiplier={1.3}
                 style={styles.input}
                 placeholder="e.g. CUPA, CARE, Independent"
-                placeholderTextColor="#999999"
+                placeholderTextColor={colors.soft}
                 value={organizationName}
                 onChangeText={setOrganizationName}
               />
             </View>
 
-            <Text style={styles.label}>Animals You Can Rescue / Handle:</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.label}>Animals You Can Rescue / Handle:</Text>
             <View style={styles.chipsRow}>
               {ANIMAL_OPTIONS.map((item) => {
                 const selected = selectedAnimals.includes(item.id);
                 return (
-                  <TouchableOpacity
+                  <AppButton
                     key={item.id}
-                    style={[styles.chip, selected && styles.chipActive]}
+                    title={item.label}
+                    size="pill"
+                    variant={selected ? 'primary' : 'light'}
                     onPress={() => toggleAnimal(item.id)}
-                  >
-                    <Text style={[styles.chipText, selected && styles.chipTextActive]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
+                  />
                 );
               })}
             </View>
@@ -281,327 +292,224 @@ export default function AuthScreen({ navigation, route }) {
         )}
 
         {/* Submit Button */}
-        <TouchableOpacity
+        <AppButton
+          title={isLogin ? `Sign In as ${role === 'rescuer' ? 'Rescuer' : 'Citizen'}` : `Create ${role === 'rescuer' ? 'Rescuer' : 'Citizen'} Account`}
           style={styles.submitBtn}
           onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.submitBtnText}>
-              {isLogin ? `Sign In as ${role === 'rescuer' ? 'Rescuer' : 'Citizen'}` : `Create ${role === 'rescuer' ? 'Rescuer' : 'Citizen'} Account`}
-            </Text>
-          )}
-        </TouchableOpacity>
+          loading={loading}
+        />
 
         {/* Quick Demo Pre-fill Links */}
         <View style={styles.demoBox}>
-          <Text style={styles.demoLabel}>Demo Quick Logins:</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.demoLabel}>Demo Quick Logins:</Text>
           <View style={styles.demoButtonsRow}>
-            <TouchableOpacity
+            <AppButton
+              title="Fill Demo Citizen"
+              size="sm"
+              variant="light"
               style={styles.demoBtn}
+              textStyle={styles.demoBtnText}
               onPress={() => handleDemoFill('citizen')}
-            >
-              <Text style={styles.demoBtnText}>👤 Fill Demo Citizen</Text>
-            </TouchableOpacity>
+            />
 
-            <TouchableOpacity
+            <AppButton
+              title="Fill Demo Rescuer"
+              size="sm"
+              variant="light"
               style={styles.demoBtn}
+              textStyle={styles.demoBtnText}
               onPress={() => handleDemoFill('rescuer')}
-            >
-              <Text style={styles.demoBtnText}>🚑 Fill Demo Rescuer</Text>
-            </TouchableOpacity>
+            />
           </View>
         </View>
-
-        {/* Skip / Guest Link */}
-        <TouchableOpacity
-          style={styles.guestBtn}
-          onPress={handleGuestContinue}
-        >
-          <Text style={styles.guestText}>
-            Reporting in a hurry? <Text style={styles.guestUnderline}>Continue as Guest →</Text>
-          </Text>
-        </TouchableOpacity>
       </View>
-    </ScrollView>
-  </View>
-</ImageBackground>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  bgImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(12, 26, 20, 0.55)',
-  },
-  container: {
-    flex: 1,
-  },
   content: {
     flexGrow: 1,
-    padding: 16,
-    paddingTop: 36,
-    paddingBottom: 50,
-    alignItems: 'center',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 16,
-    maxWidth: 450,
-  },
-  badgeContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 20,
-    marginBottom: 8,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#1E4D3E',
-    letterSpacing: 0.8,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#E0EAE5',
-    textAlign: 'center',
-    maxWidth: 340,
-    lineHeight: 17,
+    padding: 20,
+    paddingBottom: 56,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   card: {
     width: '100%',
-    maxWidth: 450,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
     padding: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.7)',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
+    borderColor: colors.border,
+    shadowColor: colors.deep,
+    shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+    elevation: 4,
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#F0F4F2',
-    borderRadius: 10,
-    padding: 4,
-    marginBottom: 20,
+    backgroundColor: '#EFE9E0',
+    borderRadius: 28,
+    padding: 5,
+    marginBottom: 22,
   },
   tab: {
     flex: 1,
-    paddingVertical: 10,
+    minHeight: 48,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 24,
   },
   activeTab: {
     backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
+    borderWidth: 1,
+    borderColor: '#DCD5CA',
+    shadowColor: '#000000',
     shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
+    fontFamily: fonts.serif,
+    fontSize: isSmallPhone ? 13 : rs(16),
+    fontWeight: '700',
+    color: colors.muted,
   },
   activeTabText: {
-    color: '#2F5D50',
-    fontWeight: '700',
+    color: colors.ink,
   },
   sectionLabel: {
-    fontSize: 13,
+    fontSize: rs(14),
     fontWeight: '700',
-    color: '#333333',
-    marginBottom: 8,
+    color: colors.ink,
+    marginBottom: 10,
   },
   roleContainer: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 22,
   },
   roleCard: {
     flex: 1,
+    minHeight: 96,
     borderWidth: 1.5,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    padding: 12,
+    borderColor: colors.border,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     alignItems: 'center',
-    backgroundColor: '#FAFAF7',
+    justifyContent: 'center',
+    backgroundColor: colors.cream,
   },
   roleCardActive: {
-    borderColor: '#2F5D50',
-    backgroundColor: '#EAF2EF',
-  },
-  roleEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
+    borderColor: colors.forest,
+    backgroundColor: colors.forest,
   },
   roleTitle: {
-    fontSize: 14,
+    fontFamily: fonts.serif,
+    fontSize: rs(18),
     fontWeight: '700',
-    color: '#444444',
-    marginBottom: 2,
+    color: colors.ink,
+    marginBottom: 4,
   },
   roleTitleActive: {
-    color: '#2F5D50',
+    color: '#FFFFFF',
   },
   roleSub: {
-    fontSize: 11,
-    color: '#777777',
+    fontSize: rs(13),
+    color: colors.soft,
     textAlign: 'center',
-    lineHeight: 14,
+    lineHeight: rs(18),
+  },
+  roleSubActive: {
+    color: '#CFE0D6',
   },
   errorBox: {
-    backgroundColor: '#FFEBEE',
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: '#FFE3E0',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 14,
   },
   errorText: {
-    color: '#C62828',
-    fontSize: 12,
+    color: '#B3261E',
+    fontSize: rs(14),
     fontWeight: '600',
   },
   successBox: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: '#DDF3E2',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 14,
   },
   successText: {
-    color: '#2E7D32',
-    fontSize: 12,
+    color: '#1F7A3E',
+    fontSize: rs(14),
     fontWeight: '600',
   },
   inputGroup: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 6,
+    fontSize: rs(14),
+    fontWeight: '700',
+    color: colors.ink,
+    marginBottom: 8,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#D5DED9',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#222222',
-    backgroundColor: '#FAFAF7',
+    minHeight: 52,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: rs(16),
+    color: colors.ink,
+    backgroundColor: colors.cream,
   },
   rescuerSpecs: {
     marginTop: 6,
-    paddingTop: 12,
+    paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#EEEEEE',
+    borderTopColor: colors.divider,
   },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  chip: {
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#D5DED9',
-    backgroundColor: '#FFFFFF',
-  },
-  chipActive: {
-    backgroundColor: '#2F5D50',
-    borderColor: '#2F5D50',
-  },
-  chipText: {
-    fontSize: 12,
-    color: '#444444',
-    fontWeight: '500',
-  },
-  chipTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+    gap: 10,
+    marginBottom: 18,
   },
   submitBtn: {
-    backgroundColor: '#2F5D50',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
     marginTop: 8,
-    marginBottom: 16,
-  },
-  submitBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+    marginBottom: 18,
   },
   demoBox: {
-    backgroundColor: '#F5F9F7',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    backgroundColor: colors.cream,
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
-    borderColor: '#DCE9E3',
+    borderColor: colors.border,
   },
   demoLabel: {
-    fontSize: 12,
+    fontFamily: fonts.serif,
+    fontSize: rs(15),
     fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 8,
+    color: colors.forest,
+    marginBottom: 12,
   },
   demoButtonsRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   demoBtn: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#B8D1C7',
-    paddingVertical: 8,
-    borderRadius: 6,
-    alignItems: 'center',
+    paddingHorizontal: 6,
   },
   demoBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2F5D50',
-  },
-  guestBtn: {
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  guestText: {
-    fontSize: 13,
-    color: '#666666',
-  },
-  guestUnderline: {
-    color: '#2F5D50',
-    fontWeight: '700',
-    textDecorationLine: 'underline',
+    fontSize: rs(13),
   },
 });

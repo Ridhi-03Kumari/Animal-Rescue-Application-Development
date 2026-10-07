@@ -3,12 +3,17 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   ActivityIndicator,
   RefreshControl,
-  TouchableOpacity,
 } from 'react-native';
 import api from '../../services/api';
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import SegmentedNav from '../../components/SegmentedNav';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
 
 const PROGRESS_STAGES = [
   { key: 'reported', title: 'Report Submitted', desc: 'Your rescue request has been received.' },
@@ -36,7 +41,7 @@ export default function CaseTrackingScreen({ route, navigation }) {
           setCaseData(allRes.cases[0]);
         }
       } catch (err) {
-        console.warn('Error fetching latest case:', err.message);
+        console.log('Could not load latest case:', err.message);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -49,7 +54,7 @@ export default function CaseTrackingScreen({ route, navigation }) {
       const res = await api.getCaseById(caseId);
       setCaseData(res.case);
     } catch (err) {
-      console.warn('Error fetching case:', err.message);
+      console.log('Could not load case:', err.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -70,10 +75,10 @@ export default function CaseTrackingScreen({ route, navigation }) {
 
   if (loading && !caseData) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2F5D50" />
-        <Text style={styles.loadingText}>Fetching live rescue status...</Text>
-      </View>
+      <ScreenBackground variant="citizen" style={styles.center}>
+        <ActivityIndicator size="large" color={colors.forest} />
+        <Text maxFontSizeMultiplier={1.3} style={styles.loadingText}>Fetching live rescue status...</Text>
+      </ScreenBackground>
     );
   }
 
@@ -94,307 +99,289 @@ export default function CaseTrackingScreen({ route, navigation }) {
   const assignedRescuer = caseData?.assignedRescuer;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          eyebrow={caseData ? `Case #${caseData._id.slice(-6).toUpperCase()}` : 'Live Status'}
+          title={
+            <>
+              Live Case <Accent>Tracking</Accent>
+            </>
+          }
+          subtitle="Follow the live progress of your rescue report"
+          left={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: '← Home', onPress: () => navigation.navigate('CitizenHome') }]}
+            />
+          }
+          right={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: 'Refresh', onPress: fetchCaseDetails }]}
+            />
+          }
+        />
+      }
+      scroll
+      contentStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <View style={styles.topNav}>
-        <TouchableOpacity onPress={() => navigation.navigate('CitizenHome')}>
-          <Text style={styles.backBtn}>← Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={fetchCaseDetails}>
-          <Text style={styles.refreshBtn}>↻ Refresh</Text>
-        </TouchableOpacity>
-      </View>
+        {/* Case Header Card */}
+        <View style={styles.caseCard}>
+          <View style={styles.caseHeader}>
+            <View>
+              <Text maxFontSizeMultiplier={1.3} style={styles.caseLabel}>Case ID</Text>
+              <Text maxFontSizeMultiplier={1.3} style={styles.caseId}>#{caseData ? caseData._id.slice(-6).toUpperCase() : 'DEMO'}</Text>
+            </View>
 
-      <Text style={styles.title}>Live Case Tracking</Text>
-      <Text style={styles.subtitle}>Follow the live progress of your rescue report</Text>
-
-      {/* Case Header Card */}
-      <View style={styles.caseCard}>
-        <View style={styles.caseHeader}>
-          <View>
-            <Text style={styles.caseLabel}>Case ID</Text>
-            <Text style={styles.caseId}>#{caseData ? caseData._id.slice(-6).toUpperCase() : 'DEMO'}</Text>
+            <View style={styles.statusBadge}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.statusText}>{currentStatus.replace(/_/g, ' ').toUpperCase()}</Text>
+            </View>
           </View>
 
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>{currentStatus.replace(/_/g, ' ').toUpperCase()}</Text>
-          </View>
+          <Text maxFontSizeMultiplier={1.3} style={styles.animalText}>
+            Animal: {caseData?.animalType ? caseData.animalType.toUpperCase() : 'Dog'}
+          </Text>
+
+          <Text maxFontSizeMultiplier={1.3} style={styles.locationText}>
+            {caseData?.location?.address || 'Indiranagar / Bengaluru Location Captured'}
+          </Text>
+
+          {caseData?.urgency && (
+            <Text maxFontSizeMultiplier={1.3} style={styles.urgencyTag}>AI Urgency: {caseData.urgency}</Text>
+          )}
         </View>
 
-        <Text style={styles.animalText}>
-          Animal: {caseData?.animalType ? caseData.animalType.toUpperCase() : 'Dog'}
-        </Text>
+        {/* Progress Timeline */}
+        <Text maxFontSizeMultiplier={1.3} style={styles.sectionTitle}>Rescue Progress</Text>
+        <View style={styles.timeline}>
+          {PROGRESS_STAGES.map((stage, index) => {
+            const stageIdx = stageOrder.indexOf(stage.key);
+            const isCompleted = currentStageIdx >= stageIdx && currentStageIdx >= 0;
 
-        <Text style={styles.locationText}>
-          📍 {caseData?.location?.address || 'Indiranagar / Bengaluru Location Captured'}
-        </Text>
-
-        {caseData?.urgency && (
-          <Text style={styles.urgencyTag}>AI Urgency: {caseData.urgency}</Text>
-        )}
-      </View>
-
-      {/* Progress Timeline */}
-      <Text style={styles.sectionTitle}>Rescue Progress</Text>
-      <View style={styles.timeline}>
-        {PROGRESS_STAGES.map((stage, index) => {
-          const stageIdx = stageOrder.indexOf(stage.key);
-          const isCompleted = currentStageIdx >= stageIdx && currentStageIdx >= 0;
-
-          return (
-            <View key={stage.key} style={styles.timelineRow}>
-              <View style={styles.timelineLeft}>
-                <View style={[styles.circle, isCompleted && styles.completedCircle]}>
-                  {isCompleted && <Text style={styles.check}>✓</Text>}
+            return (
+              <View key={stage.key} style={styles.timelineRow}>
+                <View style={styles.timelineLeft}>
+                  <View style={[styles.circle, isCompleted && styles.completedCircle]}>
+                    {isCompleted && <View style={styles.checkMark} />}
+                  </View>
+                  {index < PROGRESS_STAGES.length - 1 && (
+                    <View style={[styles.line, isCompleted && styles.completedLine]} />
+                  )}
                 </View>
-                {index < PROGRESS_STAGES.length - 1 && (
-                  <View style={[styles.line, isCompleted && styles.completedLine]} />
-                )}
+
+                <View style={styles.timelineContent}>
+                  <Text maxFontSizeMultiplier={1.3} style={[styles.stepTitle, isCompleted && styles.completedTitle]}>
+                    {stage.title}
+                  </Text>
+                  <Text maxFontSizeMultiplier={1.3} style={styles.stepDescription}>{stage.desc}</Text>
+                </View>
               </View>
+            );
+          })}
+        </View>
 
-              <View style={styles.timelineContent}>
-                <Text style={[styles.stepTitle, isCompleted && styles.completedTitle]}>
-                  {stage.title}
-                </Text>
-                <Text style={styles.stepDescription}>{stage.desc}</Text>
-              </View>
-            </View>
-          );
-        })}
-      </View>
+        {/* Assigned Rescuer Card */}
+        <View style={styles.rescuerCard}>
+          <Text maxFontSizeMultiplier={1.3} style={styles.rescuerLabel}>Assigned Rescuer</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.rescuerName}>
+            {assignedRescuer?.organizationName ||
+              assignedRescuer?.user?.name ||
+              'Smart Responder Dispatched'}
+          </Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.rescuerInfo}>
+            {currentStatus === 'cancelled'
+              ? 'This rescue was cancelled.'
+              : currentStageIdx >= stageOrder.indexOf('accepted')
+              ? `Current stage: ${
+                  (PROGRESS_STAGES.find((s) => s.key === currentStatus) || {}).title || 'Treatment Started'
+                }`
+              : 'Matching best rescuer by proximity and animal capability...'}
+          </Text>
+        </View>
 
-      {/* Assigned Rescuer Card */}
-      <View style={styles.rescuerCard}>
-        <Text style={styles.rescuerLabel}>Assigned Rescuer</Text>
-        <Text style={styles.rescuerName}>
-          {assignedRescuer?.organizationName ||
-            assignedRescuer?.user?.name ||
-            'Smart Responder Dispatched'}
-        </Text>
-        <Text style={styles.rescuerInfo}>
-          {currentStageIdx >= stageOrder.indexOf('accepted')
-            ? 'Rescuer is active. Live tracking updates are active.'
-            : 'Matching best rescuer by proximity and animal capability...'}
-        </Text>
-      </View>
-
-      {/* View QR Profile if completed */}
-      {currentStatus === 'completed' && (
-        <TouchableOpacity
-          style={styles.qrActionBtn}
-          onPress={() =>
-            navigation.navigate('AnimalQr', {
-              caseId: caseData._id,
-            })
-          }
-        >
-          <Text style={styles.qrActionBtnText}>🔍 View Animal Digital Profile & QR Tag</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+        {/* View QR Profile if completed */}
+        {currentStatus === 'completed' && (
+          <AppButton
+            title="View Animal Digital Profile & QR Tag"
+            variant="accent"
+            style={styles.qrActionBtn}
+            onPress={() =>
+              navigation.navigate('AnimalQr', {
+                caseId: caseData._id,
+              })
+            }
+          />
+        )}
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAF7',
-  },
   content: {
-    padding: 24,
-    paddingTop: 45,
-    paddingBottom: 40,
-    maxWidth: 620,
+    padding: 20,
+    paddingBottom: 48,
+    maxWidth: 640,
     width: '100%',
     alignSelf: 'center',
   },
   center: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
     marginTop: 12,
-    color: '#666666',
-  },
-  topNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  backBtn: {
-    color: '#2F5D50',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  refreshBtn: {
-    color: '#2F5D50',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#555555',
-    marginBottom: 20,
+    fontSize: rs(16),
+    color: colors.muted,
   },
   caseCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 24,
+    borderColor: colors.border,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 28,
   },
   caseHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   caseLabel: {
-    fontSize: 12,
-    color: '#777777',
+    fontSize: rs(13),
+    color: colors.soft,
+    fontWeight: '600',
   },
   caseId: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#222222',
+    fontFamily: fonts.display,
+    fontSize: rs(29),
+    color: colors.ink,
   },
   statusBadge: {
-    backgroundColor: '#DCE9E3',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 14,
+    backgroundColor: colors.forest,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 18,
   },
   statusText: {
-    color: '#2F5D50',
-    fontSize: 11,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: rs(13),
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   animalText: {
-    fontSize: 15,
-    color: '#2F5D50',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  locationText: {
-    fontSize: 13,
-    color: '#666666',
+    fontSize: rs(17),
+    color: colors.forest,
+    fontWeight: '700',
     marginBottom: 6,
   },
+  locationText: {
+    fontSize: rs(15),
+    color: colors.muted,
+    marginBottom: 8,
+  },
   urgencyTag: {
-    fontSize: 12,
-    color: '#C62828',
-    fontWeight: '700',
+    fontSize: rs(14),
+    color: '#B3261E',
+    fontWeight: '800',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#222222',
+    fontFamily: fonts.display,
+    fontSize: rs(26),
+    color: colors.forestDark,
     marginBottom: 16,
   },
   timeline: {
-    marginBottom: 20,
+    marginBottom: 22,
   },
   timelineRow: {
     flexDirection: 'row',
-    minHeight: 64,
+    minHeight: 70,
   },
   timelineLeft: {
-    width: 32,
+    width: 36,
     alignItems: 'center',
   },
   circle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#B8C8C1',
+    borderColor: colors.sageDeep,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   completedCircle: {
-    backgroundColor: '#2F5D50',
-    borderColor: '#2F5D50',
+    backgroundColor: colors.forest,
+    borderColor: colors.forest,
   },
-  check: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
+  checkMark: {
+    width: 7,
+    height: 13,
+    borderRightWidth: 2.5,
+    borderBottomWidth: 2.5,
+    borderColor: '#FFFFFF',
+    transform: [{ rotate: '45deg' }],
+    marginTop: -2,
   },
   line: {
     flex: 1,
     width: 2,
-    backgroundColor: '#D5DED9',
+    backgroundColor: colors.border,
     marginVertical: 2,
   },
   completedLine: {
-    backgroundColor: '#2F5D50',
+    backgroundColor: colors.forest,
   },
   timelineContent: {
     flex: 1,
-    paddingLeft: 12,
-    paddingBottom: 16,
+    paddingLeft: 14,
+    paddingBottom: 18,
   },
   stepTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#777777',
-    marginBottom: 2,
+    fontFamily: fonts.serif,
+    fontSize: rs(17),
+    fontWeight: '700',
+    color: colors.soft,
+    marginBottom: 3,
   },
   completedTitle: {
-    color: '#2F5D50',
-    fontWeight: '700',
+    color: colors.forest,
   },
   stepDescription: {
-    fontSize: 12,
-    color: '#666666',
-    lineHeight: 17,
+    fontSize: rs(14),
+    color: colors.muted,
+    lineHeight: rs(20),
   },
   rescuerCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D5DED9',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.sage,
+    borderRadius: 20,
+    padding: 20,
     marginBottom: 20,
   },
   rescuerLabel: {
-    fontSize: 12,
-    color: '#777777',
-    marginBottom: 4,
-  },
-  rescuerName: {
-    fontSize: 17,
+    fontSize: rs(13),
     fontWeight: '700',
-    color: '#2F5D50',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: colors.gold,
     marginBottom: 6,
   },
+  rescuerName: {
+    fontFamily: fonts.display,
+    fontSize: rs(25),
+    color: colors.forest,
+    marginBottom: 8,
+  },
   rescuerInfo: {
-    fontSize: 13,
-    color: '#666666',
-    lineHeight: 18,
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
   },
   qrActionBtn: {
-    backgroundColor: '#2F5D50',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
     marginBottom: 20,
-  },
-  qrActionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });

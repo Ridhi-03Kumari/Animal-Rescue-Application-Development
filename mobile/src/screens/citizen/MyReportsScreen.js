@@ -1,120 +1,159 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  TouchableOpacity,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import api from '../../services/api';
 import { getReports } from '../../services/storage';
+import { collapseDuplicateReports } from '../../services/dedupe';
+import { useSession } from '../../context/SessionContext';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import SegmentedNav from '../../components/SegmentedNav';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
 
-export default function MyReportsScreen() {
+const readableStatus = (status) => String(status || 'reported').replace(/_/g, ' ');
+
+export default function MyReportsScreen({ navigation }) {
+  const { user } = useSession();
   const [reports, setReports] = useState([]);
 
-  useEffect(() => {
-    const loadReports = async () => {
-      const savedReports = await getReports();
-      setReports(savedReports);
-    };
-
-    loadReports();
-  }, []);
+  // Signed in: the reports come from the server, so their status is always current.
+  // Guest: only the reports saved on this phone.
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        if (user) {
+          try {
+            const res = await api.getMyReports();
+            setReports(
+              collapseDuplicateReports(
+                (res.cases || []).map((c) => ({
+                  id: c._id,
+                  animalType: c.animalType,
+                  description: c.description,
+                  location: c.location,
+                  urgency: c.urgency,
+                  status: readableStatus(c.status),
+                  createdAt: c.createdAt,
+                }))
+              )
+            );
+            return;
+          } catch (e) {
+            // server not reachable: fall back to the copy kept on this phone
+          }
+        }
+        setReports(await getReports());
+      })();
+    }, [user])
+  );
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          eyebrow="Your Activity"
+          title={
+            <>
+              My <Accent>Reports</Accent>
+            </>
+          }
+          subtitle="View the animal rescue reports you have submitted."
+          left={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: '← Back', onPress: () => navigation.goBack() }]}
+            />
+          }
+        />
+      }
+      scroll
+      contentStyle={styles.content}
     >
-      <Text style={styles.title}>My Reports</Text>
-
-      <Text style={styles.subtitle}>
-        View the animal rescue reports you have submitted.
-      </Text>
-
-      {reports.length === 0 ? (
-        <View style={styles.reportCard}>
-          <Text style={styles.animalType}>
-            No reports yet
-          </Text>
-
-          <Text style={styles.details}>
-            Your submitted rescue reports will appear here.
-          </Text>
-        </View>
-      ) : (
-        reports.map((report) => (
-          <View
-            key={report.id}
-            style={styles.reportCard}
-          >
-            <View style={styles.headerRow}>
-              <Text style={styles.caseId}>
-                Case #{report.id.slice(-6)}
-              </Text>
-
-              <View style={styles.statusBadge}>
-                <Text style={styles.statusText}>
-                  {report.status}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={styles.animalType}>
-              {report.animalType}
+        {reports.length === 0 ? (
+          <View style={styles.reportCard}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.animalType}>
+              No reports yet
             </Text>
 
-            <Text style={styles.details}>
-              {report.description ||
-                'No description provided.'}
-            </Text>
-
-            <Text style={styles.date}>
-              {new Date(
-                report.createdAt
-              ).toLocaleDateString()}
-            </Text>
-
-            <Text style={styles.details}>
-              AI Urgency: {report.urgency}
+            <Text maxFontSizeMultiplier={1.3} style={styles.details}>
+              Your submitted rescue reports will appear here.
             </Text>
           </View>
-        ))
-      )}
-    </ScrollView>
+        ) : (
+          reports.map((report) => (
+            <TouchableOpacity
+              key={report.id}
+              style={styles.reportCard}
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate('CaseTracking', { caseId: report.id })}
+            >
+              <View style={styles.headerRow}>
+                <Text maxFontSizeMultiplier={1.3} style={styles.caseId}>
+                  Case #{report.id.slice(-6)}
+                </Text>
+
+                <View style={styles.statusBadge}>
+                  <Text maxFontSizeMultiplier={1.3} style={styles.statusText}>
+                    {report.status}
+                  </Text>
+                </View>
+              </View>
+
+              <Text maxFontSizeMultiplier={1.3} style={styles.animalType}>
+                {report.animalType}
+              </Text>
+
+              {report.location && report.location.address ? (
+                <Text maxFontSizeMultiplier={1.3} style={styles.details}>
+                  {report.location.address}
+                </Text>
+              ) : null}
+
+              <Text maxFontSizeMultiplier={1.3} style={styles.details}>
+                {report.description ||
+                  'No description provided.'}
+              </Text>
+
+              <Text maxFontSizeMultiplier={1.3} style={styles.date}>
+                {new Date(
+                  report.createdAt
+                ).toLocaleDateString()}
+              </Text>
+
+              <Text maxFontSizeMultiplier={1.3} style={styles.urgencyLine}>
+                AI Urgency: {report.urgency}
+              </Text>
+            </TouchableOpacity>
+          ))
+        )}
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAF7',
-  },
 
   content: {
-    padding: 24,
-    paddingBottom: 40,
-  },
-
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 8,
-  },
-
-  subtitle: {
-    fontSize: 15,
-    color: '#555555',
-    lineHeight: 22,
-    marginBottom: 24,
+    padding: 20,
+    paddingBottom: 48,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
 
   reportCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 14,
+    borderColor: colors.border,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
   },
 
   headerRow: {
@@ -125,41 +164,47 @@ const styles = StyleSheet.create({
   },
 
   caseId: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#222222',
+    fontSize: rs(15),
+    fontWeight: '700',
+    color: colors.soft,
   },
 
   statusBadge: {
-    backgroundColor: '#DCE9E3',
+    backgroundColor: colors.forest,
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 14,
+    paddingHorizontal: 14,
+    borderRadius: 18,
   },
 
   statusText: {
-    color: '#2F5D50',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: rs(13),
+    fontWeight: '800',
   },
 
   animalType: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2F5D50',
-    marginBottom: 6,
+    fontFamily: fonts.display,
+    fontSize: rs(26),
+    color: colors.forest,
+    marginBottom: 8,
   },
 
   details: {
-    fontSize: 14,
-    color: '#555555',
-    lineHeight: 20,
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
     marginBottom: 10,
   },
 
   date: {
-    fontSize: 13,
-    color: '#777777',
+    fontSize: rs(14),
+    color: colors.soft,
     marginBottom: 8,
+  },
+
+  urgencyLine: {
+    fontSize: rs(15),
+    fontWeight: '700',
+    color: colors.ink,
   },
 });

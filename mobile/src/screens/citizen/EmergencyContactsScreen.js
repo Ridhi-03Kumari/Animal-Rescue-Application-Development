@@ -3,13 +3,18 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   Linking,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import api from '../../services/api';
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import SegmentedNav from '../../components/SegmentedNav';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
 
 const DEFAULT_CONTACTS = [
   {
@@ -62,139 +67,118 @@ export default function EmergencyContactsScreen({ navigation }) {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-        <Text style={styles.backText}>← Back</Text>
-      </TouchableOpacity>
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          eyebrow="24x7 Helplines"
+          title={
+            <>
+              Bengaluru Emergency <Accent>Contacts</Accent>
+            </>
+          }
+          subtitle="Government helplines, trauma centers, and animal shelters across Bengaluru."
+          left={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: '← Back', onPress: () => navigation.goBack() }]}
+            />
+          }
+        />
+      }
+      scroll
+      contentStyle={styles.content}
+    >
+        {contacts.map((contact, idx) => (
+          <View key={contact.id || idx} style={styles.contactCard}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.contactCategory}>{contact.category || 'Rescue Service'}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.contactName}>{contact.name}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.description}>{contact.description}</Text>
+            {contact.area ? <Text maxFontSizeMultiplier={1.3} style={styles.areaText}>{contact.area}</Text> : null}
+            <Text maxFontSizeMultiplier={1.3} style={styles.number}>{contact.phone || contact.number}</Text>
 
-      <Text style={styles.title}>Bengaluru Emergency Contacts</Text>
-      <Text style={styles.subtitle}>
-        24x7 government helplines, trauma centers, and animal shelters across Bengaluru.
-      </Text>
+            <AppButton
+              title={`Call ${contact.phone || contact.number}`}
+              size="md"
+              onPress={() => callNumber(contact.phone || contact.number)}
+            />
+          </View>
+        ))}
 
-      {contacts.map((contact, idx) => (
-        <View key={contact.id || idx} style={styles.contactCard}>
-          <Text style={styles.contactCategory}>{contact.category || 'Rescue Service'}</Text>
-          <Text style={styles.contactName}>{contact.name}</Text>
-          <Text style={styles.description}>{contact.description}</Text>
-          {contact.area ? <Text style={styles.areaText}>📍 {contact.area}</Text> : null}
-          <Text style={styles.number}>{contact.phone || contact.number}</Text>
-
-          <TouchableOpacity
-            style={styles.callButton}
-            onPress={() => callNumber(contact.phone || contact.number)}
-          >
-            <Text style={styles.callButtonText}>Call {contact.phone || contact.number}</Text>
-          </TouchableOpacity>
+        <View style={styles.noteCard}>
+          <Text maxFontSizeMultiplier={1.3} style={styles.noteTitle}>Government 1962 Note</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.noteText}>
+            1962 is a toll-free government veterinary ambulance service operating across Karnataka.
+          </Text>
         </View>
-      ))}
-
-      <View style={styles.noteCard}>
-        <Text style={styles.noteTitle}>Government 1962 Note</Text>
-        <Text style={styles.noteText}>
-          1962 is a toll-free government veterinary ambulance service operating across Karnataka.
-        </Text>
-      </View>
-    </ScrollView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAF7',
-  },
   content: {
-    padding: 24,
-    paddingTop: 45,
-    paddingBottom: 40,
-  },
-  backBtn: {
-    marginBottom: 16,
-  },
-  backText: {
-    color: '#2F5D50',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#555555',
-    lineHeight: 20,
-    marginBottom: 20,
+    padding: 20,
+    paddingBottom: 48,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   contactCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    borderRadius: 12,
-    padding: 18,
+    borderColor: colors.border,
+    borderRadius: 20,
+    padding: 20,
     marginBottom: 16,
   },
   contactCategory: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2F5D50',
+    fontSize: rs(13),
+    fontWeight: '800',
+    color: colors.gold,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  contactName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#222222',
+    letterSpacing: 1,
     marginBottom: 6,
   },
+  contactName: {
+    fontFamily: fonts.display,
+    fontSize: rs(25),
+    lineHeight: rs(32),
+    color: colors.ink,
+    marginBottom: 8,
+  },
   description: {
-    fontSize: 13,
-    color: '#555555',
-    lineHeight: 18,
-    marginBottom: 10,
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
+    marginBottom: 12,
   },
   areaText: {
-    fontSize: 12,
-    color: '#666666',
-    fontWeight: '500',
-    marginBottom: 10,
+    fontSize: rs(14),
+    color: colors.soft,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   number: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 14,
-  },
-  callButton: {
-    backgroundColor: '#2F5D50',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  callButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    fontSize: rs(30),
+    color: colors.forest,
+    marginBottom: 16,
   },
   noteCard: {
-    backgroundColor: '#DCE9E3',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
+    backgroundColor: colors.sage,
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 4,
   },
   noteTitle: {
-    fontSize: 14,
+    fontFamily: fonts.serif,
+    fontSize: rs(17),
     fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 4,
+    color: colors.forest,
+    marginBottom: 6,
   },
   noteText: {
-    fontSize: 13,
-    color: '#444444',
-    lineHeight: 18,
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
   },
 });

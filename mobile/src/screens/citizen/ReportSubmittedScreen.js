@@ -3,175 +3,184 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
 } from 'react-native';
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
+
 export default function ReportSubmittedScreen({ navigation, route }) {
     const triage = route?.params?.triage;
     return (
-    <View style={styles.container}>
-      <View style={styles.iconCircle}>
-        <Text style={styles.check}>✓</Text>
-      </View>
+    <ScreenBackground style={styles.container}>
+      <View style={styles.inner}>
+        <View style={styles.iconCircle}>
+          <View style={styles.checkMark} />
+        </View>
 
-      <Text style={styles.title}>
-        Report Submitted
-      </Text>
-
-      <Text style={styles.message}>
-        Your animal rescue report has been submitted successfully.
-      </Text>
-
-      <View style={styles.caseCard}>
-        <Text style={styles.caseLabel}>Case Status</Text>
-
-        <Text style={styles.caseStatus}>
-          Finding a suitable rescuer
+        <Text maxFontSizeMultiplier={1.3} style={styles.title}>
+          Report <Accent>Submitted</Accent>
         </Text>
 
-        <Text style={styles.caseInfo}>
-          You will receive updates as the rescue progresses.
+        <Text maxFontSizeMultiplier={1.3} style={styles.message}>
+          Your animal rescue report has been submitted successfully.
         </Text>
-      <View/> 
-        {triage && (
+
+        <View style={styles.caseCard}>
+          <Text maxFontSizeMultiplier={1.3} style={styles.caseLabel}>Case Status</Text>
+
+          <Text maxFontSizeMultiplier={1.3} style={styles.caseStatus}>
+            Finding a suitable rescuer
+          </Text>
+
+          <Text maxFontSizeMultiplier={1.3} style={styles.caseInfo}>
+            You will receive updates as the rescue progresses.
+          </Text>
+
+          {triage && (
             <View style={styles.triageCard}>
-                <Text style={styles.triageTitle}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.triageTitle}>
                 AI Urgency Assessment
-                </Text>
+              </Text>
 
-                <Text style={styles.urgency}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.urgency}>
                 {triage.urgency}
-                </Text>
+              </Text>
 
-                <Text style={styles.triageGuidance}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.triageGuidance}>
                 {triage.guidance}
-                </Text>
+              </Text>
             </View>
-            )}
-        <TouchableOpacity
+          )}
+
+          <AppButton
+            title="View Case Tracking"
             style={styles.trackButton}
             onPress={() =>
               navigation.navigate('CaseTracking', {
                 caseId: route?.params?.caseData?._id,
               })
             }
-          >
-            <Text style={styles.trackButtonText}>
-                View Case Tracking
-            </Text>
-        </TouchableOpacity>
+          />
+        </View>
       </View>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: '#FAFAF7',
+  },
+
+  inner: {
+    width: '100%',
+    maxWidth: 520,
+    alignItems: 'center',
   },
 
   iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#DCE9E3',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: colors.forest,
+    borderWidth: 5,
+    borderColor: colors.lime,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
   },
 
-  check: {
-    fontSize: 40,
-    color: '#2F5D50',
-    fontWeight: '700',
+  checkMark: {
+    width: 16,
+    height: 30,
+    borderRightWidth: 5,
+    borderBottomWidth: 5,
+    borderColor: '#FFFFFF',
+    transform: [{ rotate: '45deg' }],
+    marginTop: -5,
   },
 
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#2F5D50',
+    fontFamily: fonts.display,
+    fontSize: rs(38),
+    lineHeight: rs(46),
+    color: colors.forestDark,
     textAlign: 'center',
     marginBottom: 12,
   },
 
   message: {
-    fontSize: 16,
-    color: '#333333',
+    fontSize: rs(17),
+    color: colors.muted,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: rs(25),
     marginBottom: 28,
   },
 
   caseCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
+    borderRadius: 22,
+    padding: 22,
     borderWidth: 1,
-    borderColor: '#D5DED9',
+    borderColor: colors.border,
   },
 
   caseLabel: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: rs(14),
+    color: colors.soft,
+    fontWeight: '600',
     marginBottom: 6,
   },
 
   caseStatus: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2F5D50',
+    fontFamily: fonts.display,
+    fontSize: rs(25),
+    color: colors.forest,
     marginBottom: 8,
   },
 
   caseInfo: {
-    fontSize: 14,
-    color: '#555555',
-    lineHeight: 21,
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
   },
+
   trackButton: {
-  marginTop: 18,
-  backgroundColor: '#2F5D50',
-  paddingVertical: 13,
-  borderRadius: 9,
-  alignItems: 'center',
-},
+    marginTop: 20,
+  },
 
-trackButtonText: {
-  color: '#FFFFFF',
-  fontSize: 15,
-  fontWeight: '600',
-},
-triageCard: {
-  width: '100%',
-  backgroundColor: '#FFFFFF',
-  borderRadius: 12,
-  padding: 20,
-  borderWidth: 1,
-  borderColor: '#D5DED9',
-  marginTop: 16,
-},
+  triageCard: {
+    width: '100%',
+    backgroundColor: colors.sage,
+    borderRadius: 18,
+    padding: 18,
+    marginTop: 18,
+  },
 
-triageTitle: {
-  fontSize: 16,
-  fontWeight: '600',
-  color: '#222222',
-  marginBottom: 8,
-},
+  triageTitle: {
+    fontFamily: fonts.serif,
+    fontSize: rs(17),
+    fontWeight: '700',
+    color: colors.ink,
+    marginBottom: 8,
+  },
 
-urgency: {
-  fontSize: 22,
-  fontWeight: '700',
-  color: '#2F5D50',
-  marginBottom: 8,
-},
+  urgency: {
+    fontFamily: fonts.display,
+    fontSize: rs(31),
+    color: colors.forest,
+    marginBottom: 8,
+  },
 
-triageGuidance: {
-  fontSize: 14,
-  color: '#555555',
-  lineHeight: 21,
-},
+  triageGuidance: {
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
+  },
 });
