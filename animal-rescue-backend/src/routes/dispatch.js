@@ -1,16 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const dispatchController = require('../controllers/dispatchController');
-const { protect, optionalProtect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
+
+// Everything here is for signed-in rescuers only
+router.use(protect);
+router.use(authorize('rescuer'));
 
 // Rescuer response routes (supports both /:id/accept and /cases/:id/accept)
-router.post('/:id/accept', optionalProtect, dispatchController.acceptCase);
-router.post('/:id/decline', optionalProtect, dispatchController.declineCase);
-router.post('/cases/:id/accept', optionalProtect, dispatchController.acceptCase);
-router.post('/cases/:id/decline', optionalProtect, dispatchController.declineCase);
+router.post('/:id/accept', dispatchController.acceptCase);
+router.post('/:id/decline', dispatchController.declineCase);
+router.post('/cases/:id/accept', dispatchController.acceptCase);
+router.post('/cases/:id/decline', dispatchController.declineCase);
 
 // Active case and nearby cases
-router.get('/active', protect, dispatchController.getActiveCase);
-router.get('/nearby', protect, dispatchController.getNearbyCases);
+router.get('/active', dispatchController.getActiveCase);
+router.get('/nearby', dispatchController.getNearbyCases);
 
 module.exports = router;

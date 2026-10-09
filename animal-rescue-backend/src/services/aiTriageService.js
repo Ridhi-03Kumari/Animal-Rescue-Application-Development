@@ -7,7 +7,9 @@
  * - NEVER diagnoses diseases, recommends medicine, or predicts survival.
  */
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+// The model name comes from .env (GEMINI_MODEL) so it can be changed without touching code when Google retires a model.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const TIMEOUT_MS = 5000;
 
 /**

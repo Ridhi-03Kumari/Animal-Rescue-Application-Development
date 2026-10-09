@@ -4,7 +4,7 @@ const User = require('../models/User');
 const Rescuer = require('../models/Rescuer');
 const { isDbConnected, getUserByPhone, saveUser, saveRescuer, getRescuerByUserId } = require('../utils/devStore');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'animal_rescue_dev_secret_key_2026';
+const { JWT_SECRET } = require('../config/jwt');
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -23,8 +23,10 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ error: 'name, phone, password and role are required' });
     }
 
-    if (!['citizen', 'rescuer', 'coordinator', 'admin'].includes(role)) {
-      return res.status(400).json({ error: 'role must be citizen, rescuer, coordinator, or admin' });
+    // Anyone can sign up as a citizen or a rescuer. Coordinator and admin accounts are created by the
+    // project team (see scripts/seedRescuers.js), never through public sign-up.
+    if (!['citizen', 'rescuer'].includes(role)) {
+      return res.status(400).json({ error: 'role must be citizen or rescuer' });
     }
 
     const cleanPhone = phone.toString().trim();

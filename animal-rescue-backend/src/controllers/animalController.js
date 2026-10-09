@@ -1,7 +1,14 @@
 const QRCode = require('qrcode');
 const Animal = require('../models/Animal');
 const Case = require('../models/Case');
-const { isDbConnected, getAnimalByCaseId, getAnimalById, saveAnimal } = require('../utils/devStore');
+const {
+  isDbConnected,
+  getAnimalByCaseId,
+  getAnimalById,
+  getAllAnimals,
+  updateAnimal,
+  saveAnimal,
+} = require('../utils/devStore');
 
 /**
  * Generate QR code data URL for an animal record
@@ -18,7 +25,7 @@ async function generateQrCode(animalId, caseId) {
     errorCorrectionLevel: 'H',
     margin: 2,
     color: {
-      dark: '#2F5D50',
+      dark: '#0E4B43',
       light: '#FFFFFF',
     },
   });
@@ -41,7 +48,13 @@ exports.listAnimals = async (req, res, next) => {
       return res.json({ success: true, count: animals.length, animals });
     }
 
-    res.json({ success: true, count: 0, animals: [] });
+    // In-memory demo mode
+    let animals = getAllAnimals();
+    if (status) animals = animals.filter((a) => a.status === status);
+    if (animalType) {
+      animals = animals.filter((a) => (a.animalType || '').toLowerCase() === animalType.toLowerCase());
+    }
+    res.json({ success: true, count: animals.length, animals });
   } catch (err) {
     next(err);
   }
@@ -226,9 +239,8 @@ exports.updateAnimalProfile = async (req, res, next) => {
       }
       await animal.save();
     } else {
-      animal = getAnimalById(req.params.id);
+      animal = updateAnimal(req.params.id, { name, photos, identifyingMarkings, medicalNotes, treatment, status });
       if (!animal) return res.status(404).json({ error: 'Animal record not found' });
-      Object.assign(animal, { name, photos, identifyingMarkings, medicalNotes, treatment, status });
     }
 
     res.json({
