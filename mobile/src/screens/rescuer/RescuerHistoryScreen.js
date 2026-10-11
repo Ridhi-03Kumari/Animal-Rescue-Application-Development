@@ -3,153 +3,120 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import api from '../../services/api';
-
-const MOCK_HISTORY = [
-  {
-    _id: 'case_comp_001',
-    animalType: 'dog',
-    status: 'completed',
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    location: { address: '100 Feet Rd, Indiranagar, Bengaluru' },
-    medicalNotes: 'Fractured hind leg splinted, anti-rabies booster administered',
-    treatment: 'Admitted to CARE Veterinary Ward',
-  },
-  {
-    _id: 'case_comp_002',
-    animalType: 'cat',
-    status: 'completed',
-    createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-    location: { address: 'Koramangala 4th Block, Bengaluru' },
-    medicalNotes: 'Eye infection treated with antibiotic drops',
-    treatment: 'Discharged to local foster guardian',
-  },
-  {
-    _id: 'case_comp_003',
-    animalType: 'bird',
-    status: 'completed',
-    createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
-    location: { address: 'Cubbon Park, Bengaluru' },
-    medicalNotes: 'Kite thread entanglement removed, wing rested',
-    treatment: 'Released after flight test at PFA Wildlife Hospital',
-  },
-];
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import SegmentedNav from '../../components/SegmentedNav';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
 
 export default function RescuerHistoryScreen({ navigation }) {
-  const [history, setHistory] = useState(MOCK_HISTORY);
-  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     api
       .getAllCases({ status: 'completed' })
-      .then((res) => {
-        if (res.cases && res.cases.length > 0) {
-          setHistory(res.cases);
-        }
-      })
-      .catch((err) => {
-        console.log('Using offline rescue history cache:', err.message);
-      });
+      .then((res) => setHistory(res.cases || []))
+      .catch((err) => setErrorMsg(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Top Header */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Rescue Case History</Text>
-      </View>
-
-      <Text style={styles.subtitle}>
-        Archive of all completed animal emergency rescues and medical records.
-      </Text>
-
-      {history.map((item) => (
-        <View key={item._id} style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.animalType}>🐾 Rescued {item.animalType.toUpperCase()}</Text>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>✓ COMPLETED</Text>
-            </View>
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          eyebrow="Archive"
+          title={
+            <>
+              Rescue Case <Accent>History</Accent>
+            </>
+          }
+          subtitle="All completed animal emergency rescues and medical records."
+          left={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: '← Back', onPress: () => navigation.goBack() }]}
+            />
+          }
+        />
+      }
+      scroll
+      contentStyle={styles.content}
+    >
+        {loading ? (
+          <ActivityIndicator size="large" color={colors.forest} style={{ marginTop: 24 }} />
+        ) : errorMsg ? (
+          <View style={styles.card}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.animalType}>Could not load history</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.location}>{errorMsg}</Text>
           </View>
+        ) : history.length === 0 ? (
+          <View style={styles.card}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.animalType}>No completed rescues yet</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.location}>
+              When a rescue is marked Completed, it appears here with the animal's collar QR.
+            </Text>
+          </View>
+        ) : null}
 
-          <Text style={styles.date}>
-            Rescue Date: {new Date(item.createdAt).toLocaleDateString()}
-          </Text>
-
-          <Text style={styles.location}>
-            📍 {item.location?.address || 'Bengaluru Location'}
-          </Text>
-
-          {item.medicalNotes ? (
-            <View style={styles.medicalBox}>
-              <Text style={styles.medicalTitle}>Medical Notes:</Text>
-              <Text style={styles.medicalText}>{item.medicalNotes}</Text>
+        {history.map((item) => (
+          <View key={item._id} style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.animalType}>Rescued {item.animalType.toUpperCase()}</Text>
+              <View style={styles.badge}>
+                <Text maxFontSizeMultiplier={1.3} style={styles.badgeText}>COMPLETED</Text>
+              </View>
             </View>
-          ) : null}
 
-          <TouchableOpacity
-            style={styles.qrBtn}
-            onPress={() => navigation.navigate('AnimalQr', { caseId: item._id })}
-          >
-            <Text style={styles.qrBtnText}>🔍 View Collar QR Health Profile</Text>
-          </TouchableOpacity>
-        </View>
-      ))}
-    </ScrollView>
+            <Text maxFontSizeMultiplier={1.3} style={styles.date}>
+              Rescue Date: {new Date(item.createdAt).toLocaleDateString()}
+            </Text>
+
+            <Text maxFontSizeMultiplier={1.3} style={styles.location}>
+              {item.location?.address || 'Bengaluru Location'}
+            </Text>
+
+            {item.medicalNotes ? (
+              <View style={styles.medicalBox}>
+                <Text maxFontSizeMultiplier={1.3} style={styles.medicalTitle}>Medical Notes</Text>
+                <Text maxFontSizeMultiplier={1.3} style={styles.medicalText}>{item.medicalNotes}</Text>
+              </View>
+            ) : null}
+
+            <AppButton
+              title="View Collar QR Health Profile"
+              size="md"
+              onPress={() => navigation.navigate('AnimalQr', { caseId: item._id })}
+            />
+          </View>
+        ))}
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAF7',
-  },
   content: {
     padding: 20,
-    paddingTop: 45,
-    paddingBottom: 40,
+    paddingBottom: 48,
     maxWidth: 640,
     width: '100%',
     alignSelf: 'center',
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backText: {
-    color: '#2F5D50',
-    fontSize: 15,
-    fontWeight: '600',
-    marginRight: 20,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#222222',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
-    marginBottom: 20,
-  },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    padding: 18,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
+    borderColor: colors.border,
+    padding: 20,
+    marginBottom: 18,
+    shadowColor: colors.deep,
+    shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
   },
@@ -157,64 +124,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 10,
+    marginBottom: 10,
   },
   animalType: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#222222',
+    fontFamily: fonts.display,
+    fontSize: rs(25),
+    color: colors.ink,
+    flexShrink: 1,
   },
   badge: {
-    backgroundColor: '#E8F5E9',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
+    backgroundColor: colors.forest,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
   },
   badgeText: {
-    color: '#2E7D32',
-    fontSize: 11,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: rs(12),
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
   date: {
-    fontSize: 12,
-    color: '#888888',
+    fontSize: rs(14),
+    color: colors.soft,
     marginBottom: 6,
   },
   location: {
-    fontSize: 13,
-    color: '#444444',
-    marginBottom: 10,
-  },
-  medicalBox: {
-    backgroundColor: '#FAFAF7',
-    borderRadius: 8,
-    padding: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#2F5D50',
+    fontSize: rs(15),
+    fontWeight: '600',
+    color: colors.ink,
     marginBottom: 12,
   },
+  medicalBox: {
+    backgroundColor: colors.cream,
+    borderRadius: 14,
+    padding: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.orange,
+    marginBottom: 16,
+  },
   medicalTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2F5D50',
-    marginBottom: 2,
+    fontSize: rs(13),
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: colors.gold,
+    marginBottom: 4,
   },
   medicalText: {
-    fontSize: 12,
-    color: '#555555',
-    lineHeight: 17,
-  },
-  qrBtn: {
-    backgroundColor: '#E2EFE9',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  qrBtnText: {
-    color: '#1E4D3E',
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: rs(15),
+    color: colors.muted,
+    lineHeight: rs(22),
   },
 });

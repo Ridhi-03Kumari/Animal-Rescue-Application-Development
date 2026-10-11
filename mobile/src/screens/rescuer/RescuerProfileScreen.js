@@ -1,281 +1,354 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import api from '../../services/api';
+import { notify } from '../../services/notify';
+import { useSession } from '../../context/SessionContext';
+import AppButton from '../../components/AppButton';
+import ScreenBackground from '../../components/ScreenBackground';
+import ScreenHeader from '../../components/ScreenHeader';
+import SegmentedNav from '../../components/SegmentedNav';
+import { Accent } from '../../components/Heading';
+import { colors, fonts } from '../../theme';
+import { rs } from '../../responsive';
+
+const centered = { justifyContent: 'center', alignItems: 'center', padding: 24 };
+
+const ANIMAL_LABELS = {
+  dog: 'Dogs',
+  cat: 'Cats',
+  cattle: 'Cows / Cattle',
+  cow: 'Cows / Cattle',
+  bird: 'Birds',
+  wildlife: 'Wildlife / Reptiles',
+  monkey: 'Monkeys',
+};
+
+const initialsOf = (name) =>
+  String(name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('');
 
 export default function RescuerProfileScreen({ navigation }) {
-  const [isAvailable, setIsAvailable] = useState(true);
+  const { signOut } = useSession();
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const ANIMALS_HANDLED = ['Dogs', 'Cats', 'Cows / Cattle', 'Birds', 'Monkeys'];
+  // Everything here is this rescuer's real record from the server
+  useFocusEffect(
+    useCallback(() => {
+      api
+        .getRescuerProfile()
+        .then((res) => {
+          setProfile(res.rescuer);
+          setLoadError('');
+        })
+        .catch((err) => setLoadError(err.message))
+        .finally(() => setLoading(false));
+    }, [])
+  );
+
+  const isAvailable = Boolean(profile && profile.available);
+  const onRescue = Boolean(profile && profile.activeCaseId);
+  const animalsHandled = (profile && profile.animalsHandled) || [];
+  const completed = (profile && profile.completedCasesCount) || 0;
+  const responsePercent = profile ? Math.round((profile.responseRate ?? 0) * 100) : 0;
+  const avgMinutes = profile && profile.averageResponseTime ? `~${Math.round(profile.averageResponseTime)} min` : '-';
+
+  const changeAvailability = async (next) => {
+    if (onRescue) {
+      notify('You are on a rescue', 'You stay Busy until you complete or cancel your current rescue.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.updateAvailability(next);
+      setProfile((current) => ({ ...current, available: Boolean(res.available) }));
+    } catch (err) {
+      notify('Could not change duty status', err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <ScreenBackground variant="rescuer" style={centered}>
+        <ActivityIndicator size="large" color={colors.forest} />
+      </ScreenBackground>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <ScreenBackground variant="rescuer" style={centered}>
+        <Text maxFontSizeMultiplier={1.3} style={styles.name}>Could not load your profile</Text>
+        <Text maxFontSizeMultiplier={1.3} style={styles.org}>{loadError}</Text>
+        <AppButton title="Back" size="md" onPress={() => navigation.goBack()} />
+      </ScreenBackground>
+    );
+  }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Top Header */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Rescuer Profile</Text>
-      </View>
-
-      {/* Avatar Card */}
-      <View style={styles.profileCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>RK</Text>
-        </View>
-
-        <Text style={styles.name}>Rahul Kumar</Text>
-        <Text style={styles.org}>Compassion Animal Rescue Bengaluru</Text>
-        <Text style={styles.phone}>📞 +91 98765 43210</Text>
-
-        <View style={styles.verifiedBadge}>
-          <Text style={styles.verifiedText}>✓ Verified Responder</Text>
-        </View>
-      </View>
-
-      {/* Availability Status Card */}
-      <View style={styles.statusCard}>
-        <View>
-          <Text style={styles.statusTitle}>Duty Availability</Text>
-          <Text style={styles.statusSubtext}>
-            {isAvailable ? 'Available to receive nearby emergency dispatches' : 'Busy / Off duty'}
-          </Text>
-        </View>
-        <Switch
-          value={isAvailable}
-          onValueChange={setIsAvailable}
-          trackColor={{ false: '#DDDDDD', true: '#C8E6C9' }}
-          thumbColor={isAvailable ? '#2E7D32' : '#888888'}
+    <ScreenBackground
+      header={
+        <ScreenHeader
+          eyebrow="Personal Information"
+          title={
+            <>
+              Rescuer <Accent>Profile</Accent>
+            </>
+          }
+          subtitle="Your details, availability and rescue record."
+          left={
+            <SegmentedNav
+              activeKey="nav"
+              items={[{ key: 'nav', label: '← Back', onPress: () => navigation.goBack() }]}
+            />
+          }
         />
-      </View>
-
-      {/* Performance Stats */}
-      <Text style={styles.sectionHeader}>Rescue Performance</Text>
-      <View style={styles.statsRow}>
-        <View style={styles.statBox}>
-          <Text style={styles.statNum}>15</Text>
-          <Text style={styles.statLabel}>Completed Rescues</Text>
-        </View>
-
-        <View style={styles.statBox}>
-          <Text style={styles.statNum}>92%</Text>
-          <Text style={styles.statLabel}>Response Rate</Text>
-        </View>
-
-        <View style={styles.statBox}>
-          <Text style={styles.statNum}>~8 min</Text>
-          <Text style={styles.statLabel}>Avg Arrival</Text>
-        </View>
-      </View>
-
-      {/* Species Capability */}
-      <Text style={styles.sectionHeader}>Animals Handled</Text>
-      <View style={styles.chipContainer}>
-        {ANIMALS_HANDLED.map((animal) => (
-          <View key={animal} style={styles.chip}>
-            <Text style={styles.chipText}>🐾 {animal}</Text>
+      }
+      scroll
+      contentStyle={styles.content}
+    >
+        {/* Avatar Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.avatarText}>{initialsOf(profile.user?.name)}</Text>
           </View>
-        ))}
-      </View>
 
-      {/* Action Buttons */}
-      <View style={styles.actionContainer}>
-        <TouchableOpacity
-          style={styles.historyBtn}
-          onPress={() => navigation.navigate('RescuerHistory')}
-        >
-          <Text style={styles.historyBtnText}>📜 View Completed Rescue History</Text>
-        </TouchableOpacity>
+          <Text maxFontSizeMultiplier={1.3} style={styles.name}>{profile.user?.name || 'Rescuer'}</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.org}>{profile.organizationName || 'Independent Rescuer'}</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.phone}>{profile.user?.phone || ''}</Text>
 
-        <TouchableOpacity
-          style={styles.switchBtn}
-          onPress={() => navigation.navigate('CitizenHome')}
-        >
-          <Text style={styles.switchBtnText}>⇄ Switch to Citizen View</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+          <View style={styles.verifiedBadge}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.verifiedText}>
+              {profile.isVerified ? 'Verified Responder' : 'Verification pending'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Availability Status Card */}
+        <View style={styles.statusCard}>
+          <View style={styles.statusCopy}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statusTitle}>Duty Availability</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statusSubtext}>
+              {onRescue
+                ? 'Busy: you are on a rescue right now'
+                : isAvailable
+                ? 'Available to receive nearby emergency dispatches'
+                : 'Busy / Off duty'}
+            </Text>
+          </View>
+          <Switch
+            value={isAvailable}
+            disabled={saving || onRescue}
+            onValueChange={changeAvailability}
+            trackColor={{ false: '#CFC8BD', true: colors.sageDeep }}
+            thumbColor={isAvailable ? colors.forest : colors.soft}
+          />
+        </View>
+
+        {/* Performance Stats */}
+        <Text maxFontSizeMultiplier={1.3} style={styles.sectionHeader}>Rescue Performance</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statNum}>{completed}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statLabel}>Completed Rescues</Text>
+          </View>
+
+          <View style={styles.statBox}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statNum}>{responsePercent}%</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statLabel}>Response Rate</Text>
+          </View>
+
+          <View style={styles.statBox}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statNum}>{avgMinutes}</Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.statLabel}>Avg Arrival</Text>
+          </View>
+        </View>
+
+        {/* Species Capability */}
+        <Text maxFontSizeMultiplier={1.3} style={styles.sectionHeader}>Animals Handled</Text>
+        <View style={styles.chipContainer}>
+          {animalsHandled.map((animal) => (
+            <View key={animal} style={styles.chip}>
+              <Text maxFontSizeMultiplier={1.3} style={styles.chipText}>{ANIMAL_LABELS[animal] || animal}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionContainer}>
+          <AppButton
+            title="View Completed Rescue History"
+            onPress={() => navigation.navigate('RescuerHistory')}
+          />
+
+          <AppButton
+            title="Sign out"
+            variant="accent"
+            onPress={signOut}
+          />
+        </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAF7',
-  },
   content: {
     padding: 20,
-    paddingTop: 45,
-    paddingBottom: 40,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  backText: {
-    color: '#2F5D50',
-    fontSize: 15,
-    fontWeight: '600',
-    marginRight: 20,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#222222',
+    paddingBottom: 48,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   profileCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    padding: 24,
+    borderColor: colors.border,
+    padding: 26,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#2F5D50',
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 4,
+    borderColor: colors.orangeSoft,
+    backgroundColor: colors.forest,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   avatarText: {
+    fontFamily: fonts.display,
     color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: rs(38),
   },
   name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#222222',
+    fontFamily: fonts.display,
+    fontSize: rs(31),
+    color: colors.ink,
     marginBottom: 4,
   },
   org: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 6,
+    fontSize: rs(16),
+    lineHeight: rs(23),
+    color: colors.muted,
+    marginBottom: 8,
     textAlign: 'center',
   },
   phone: {
-    fontSize: 13,
-    color: '#2F5D50',
-    fontWeight: '600',
-    marginBottom: 12,
+    fontSize: rs(17),
+    color: colors.forest,
+    fontWeight: '700',
+    marginBottom: 14,
   },
   verifiedBadge: {
-    backgroundColor: '#E8F5E9',
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    backgroundColor: colors.forest,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 20,
   },
   verifiedText: {
-    color: '#2E7D32',
-    fontSize: 12,
+    color: '#FFFFFF',
+    fontSize: rs(14),
     fontWeight: '700',
+    letterSpacing: 0.4,
   },
   statusCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    padding: 18,
+    borderColor: colors.border,
+    padding: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 26,
+  },
+  statusCopy: {
+    flex: 1,
   },
   statusTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#222222',
-    marginBottom: 3,
+    fontFamily: fonts.display,
+    fontSize: rs(23),
+    color: colors.ink,
+    marginBottom: 4,
   },
   statusSubtext: {
-    fontSize: 12,
-    color: '#666666',
-    maxWidth: 220,
+    fontSize: rs(14),
+    lineHeight: rs(20),
+    color: colors.muted,
   },
   sectionHeader: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#222222',
+    fontFamily: fonts.display,
+    fontSize: rs(26),
+    color: colors.forestDark,
     marginBottom: 12,
   },
   statsRow: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 24,
+    marginBottom: 26,
   },
   statBox: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#D5DED9',
-    padding: 14,
+    borderColor: colors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
     alignItems: 'center',
   },
   statNum: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2F5D50',
+    fontFamily: fonts.display,
+    fontSize: rs(29),
+    color: colors.forest,
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 11,
-    color: '#666666',
+    fontSize: rs(13),
+    lineHeight: rs(18),
+    color: colors.muted,
     textAlign: 'center',
   },
   chipContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 28,
+    gap: 10,
+    marginBottom: 30,
   },
   chip: {
-    backgroundColor: '#DCE9E3',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
+    backgroundColor: colors.orangeSoft,
+    borderWidth: 1.5,
+    borderColor: colors.orange,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 22,
   },
   chipText: {
-    color: '#2F5D50',
-    fontSize: 13,
-    fontWeight: '600',
+    color: colors.deep,
+    fontSize: rs(15),
+    fontWeight: '700',
   },
   actionContainer: {
     gap: 12,
-  },
-  historyBtn: {
-    backgroundColor: '#2F5D50',
-    paddingVertical: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  historyBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  switchBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#2F5D50',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  switchBtnText: {
-    color: '#2F5D50',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
