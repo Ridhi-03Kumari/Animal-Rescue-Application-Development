@@ -53,12 +53,28 @@ async function runEndToEndSimulation() {
 
     const caseId = reportData.case._id;
 
-    // 3. Rescuer Accepts Case
-    console.log(`\nStep 3: Rescuer accepting case ${caseId}...`);
-    const acceptRes = await fetch(`${baseUrl}/dispatch/${caseId}/accept`, {
+    // 3. Rescuer logs in and accepts the case (only a signed-in rescuer can)
+    console.log(`\nStep 3: Rescuer logging in and accepting case ${caseId}...`);
+    const loginRes = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rescuerId: '66f00112233445566778899a' }),
+      body: JSON.stringify({ phone: '9845012345', password: 'password123' }),
+    });
+    const loginData = await loginRes.json();
+    assert(loginData.token, 'Demo rescuer must be able to log in');
+    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${loginData.token}` };
+
+    const guestAcceptRes = await fetch(`${baseUrl}/dispatch/${caseId}/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    assert.strictEqual(guestAcceptRes.status, 401, 'Accepting without logging in must be refused');
+
+    const acceptRes = await fetch(`${baseUrl}/dispatch/${caseId}/accept`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: '{}',
     });
 
     const acceptData = await acceptRes.json();
@@ -83,7 +99,7 @@ async function runEndToEndSimulation() {
     for (const stage of stages) {
       const updateRes = await fetch(`${baseUrl}/cases/${caseId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify(stage),
       });
       finalUpdate = await updateRes.json();

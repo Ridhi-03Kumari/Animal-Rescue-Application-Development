@@ -6,6 +6,7 @@ const tests = [
   'tests/aiTriage.test.js',
   'tests/animalsAndQR.test.js',
   'tests/contacts.test.js',
+  'tests/devStoreAndRescuers.test.js',
   'tests/simulateEndToEnd.test.js',
 ];
 
@@ -19,7 +20,11 @@ for (const testFile of tests) {
   try {
     const fullPath = path.join(__dirname, '..', testFile);
     console.log(`\n▶️ Executing: ${testFile}`);
-    execSync(`node "${fullPath}"`, { stdio: 'inherit' });
+    // Tests must not write the real dev data file (the persistence test opts back in with its own temp file)
+    execSync(`node "${fullPath}"`, {
+      stdio: 'inherit',
+      env: { ...process.env, DEV_STORE_PERSIST: 'false' },
+    });
   } catch (err) {
     console.error(`❌ Test failed in ${testFile}`);
     allPassed = false;
