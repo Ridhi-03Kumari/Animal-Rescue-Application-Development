@@ -1,39 +1,61 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
-const uploadDir = path.join(__dirname, '../../public/uploads');
+// Memory storage keeps uploaded files in RAM as a Buffer, allowing direct streaming
+// to Cloudinary without creating temporary artifacts on the server filesystem.
+const storage = multer.memoryStorage();
 
-// Ensure upload directory exists
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `animal-${uniqueSuffix}${ext}`);
-  },
-});
+const ALLOWED_EXTENSIONS = /\.(jpe?g|png|webp|gif)$/i;
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp|gif/;
-  const extName = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimeType = allowedTypes.test(file.mimetype);
+  const mime = (file.mimetype || '').toLowerCase();
+  let ext = path.extname(file.originalname || '').toLowerCase();
 
-  if (extName && mimeType) {
-    return cb(null, true);
+  // 1. Strict MIME type validation
+  if (!mime || !ALLOWED_MIME_TYPES.has(mime)) {
+    return cb(
+      new Error(`Invalid MIME type: "${mime || 'unknown'}". Only JPEG, PNG, WEBP, and GIF images are allowed.`)
+    );
   }
-  cb(new Error('Only image files (JPEG, JPG, PNG, WEBP, GIF) are allowed'));
+
+  // 2. Extension validation & safe Android content URI normalization
+  if (ext) {
+    if (!ALLOWED_EXTENSIONS.test(ext)) {
+      return cb(
+        new Error(`Invalid file extension: "${ext}". Only .jpg, .jpeg, .png, .webp, and .gif extensions are allowed.`)
+      );
+    }
+  } else {
+    // Android ContentProvider URIs may submit extensionless filenames (e.g. "1000000034").
+    // Safely append the legitimate extension matching the verified MIME type.
+    const derivedExt =
+      mime === 'image/png'
+        ? '.png'
+        : mime === 'image/webp'
+        ? '.webp'
+        : mime === 'image/gif'
+        ? '.gif'
+        : '.jpg';
+    file.originalname = `${file.originalname || 'rescue-photo'}${derivedExt}`;
+  }
+
+  return cb(null, true);
 };
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 1,
+  },
   fileFilter,
 });
 
