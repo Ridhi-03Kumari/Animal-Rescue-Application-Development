@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
       default: 'citizen',
     },
     profilePhotoUrl: { type: String, default: '' },
+    resetPasswordTokenHash: { type: String, default: null },
+    resetPasswordExpires: { type: Date, default: null },
   },
   { timestamps: true }
 );
