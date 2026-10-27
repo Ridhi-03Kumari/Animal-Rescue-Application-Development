@@ -3,6 +3,16 @@ const Case = require('../models/Case');
 const Rescuer = require('../models/Rescuer');
 const Escalation = require('../models/Escalation');
 const notificationService = require('./notificationService');
+const {
+  isDbConnected,
+  getCase,
+  updateCase,
+  getAllRescuers,
+  updateRescuer,
+  saveEscalation,
+  findEscalationsByCaseId,
+  updateEscalation,
+} = require('../utils/devStore');
 
 // In-memory escalation timers (for active alerts)
 const activeEscalationTimers = new Map();
@@ -88,20 +98,49 @@ function rankRescuers(rescuers, caseLocation, animalType) {
  */
 async function dispatchCase(caseId, attemptNumber = 1) {
   try {
-    const caseDoc = await Case.findById(caseId);
+    const caseDoc = isDbConnected() ? await Case.findById(caseId) : getCase(caseId);
     if (!caseDoc || ['accepted', 'completed', 'cancelled'].includes(caseDoc.status)) {
       return null;
     }
 
     if (attemptNumber > MAX_DISPATCH_ATTEMPTS) {
       // Escalate to coordinator
-      caseDoc.status = 'reported'; // Keep open for manual intervention
-      caseDoc.timeline.push({
-        status: 'escalated_to_coordinator',
-        timestamp: new Date(),
-        note: `Exceeded ${MAX_DISPATCH_ATTEMPTS} automated dispatch attempts. Coordinator alerted.`,
-      });
-      await caseDoc.save();
+      const note = `Exceeded ${MAX_DISPATCH_ATTEMPTS} automated dispatch attempts. Coordinator alerted.`;
+      if (isDbConnected()) {
+        caseDoc.status = 'reported'; // Keep open for manual intervention
+        caseDoc.assignedRescuer = null;
+        caseDoc.timeline.push({
+          status: 'escalated_to_coordinator',
+          timestamp: new Date(),
+          note,
+        });
+        await caseDoc.save();
+
+        // Log coordinator escalation attempt in persistent escalation collection
+        await Escalation.create({
+          caseId: caseDoc._id,
+          attemptNumber,
+          alertedAt: new Date(),
+          expiresAt: new Date(),
+          status: 'coordinator_escalated',
+          note,
+        });
+      } else {
+        updateCase(caseDoc._id, {
+          status: 'reported',
+          assignedRescuer: null,
+          timeline: [{ status: 'escalated_to_coordinator', timestamp: new Date(), note }],
+        });
+        saveEscalation({
+          caseId: caseDoc._id,
+          attemptNumber,
+          alertedAt: new Date(),
+          expiresAt: new Date(),
+          status: 'coordinator_escalated',
+          note,
+        });
+      }
+
       await notificationService.notifyCoordinatorEscalation(
         caseDoc,
         `All ${MAX_DISPATCH_ATTEMPTS} responder attempts exhausted.`
@@ -110,26 +149,68 @@ async function dispatchCase(caseId, attemptNumber = 1) {
     }
 
     // Find previous attempts to exclude already contacted rescuers
-    const previousEscalations = await Escalation.find({ caseId });
-    const contactedRescuerIds = previousEscalations.map((e) => e.rescuerId.toString());
+    let contactedRescuerIds = [];
+    if (isDbConnected()) {
+      const previousEscalations = await Escalation.find({ caseId });
+      contactedRescuerIds = previousEscalations
+        .map((e) => (e.rescuerId ? e.rescuerId.toString() : null))
+        .filter(Boolean);
+    } else {
+      const previousEscalations = findEscalationsByCaseId(caseId);
+      contactedRescuerIds = previousEscalations
+        .map((e) => (e.rescuerId ? e.rescuerId.toString() : null))
+        .filter(Boolean);
+    }
 
     // Fetch all eligible rescuers
-    const allRescuers = await Rescuer.find({
-      _id: { $nin: contactedRescuerIds },
-      available: true,
-      activeCaseId: null,
-    }).populate('user', 'name phone');
+    let allRescuers = [];
+    if (isDbConnected()) {
+      allRescuers = await Rescuer.find({
+        _id: { $nin: contactedRescuerIds },
+        available: true,
+        activeCaseId: null,
+      }).populate('user', 'name phone');
+    } else {
+      allRescuers = getAllRescuers().filter(
+        (r) => !contactedRescuerIds.includes(String(r._id)) && r.available && !r.activeCaseId
+      );
+    }
 
     // Rank candidates
     const ranked = rankRescuers(allRescuers, caseDoc.location, caseDoc.animalType);
 
     if (ranked.length === 0) {
-      caseDoc.timeline.push({
-        status: 'escalated_to_coordinator',
-        timestamp: new Date(),
-        note: `No available rescuers found in range. Escalated to Emergency Coordinator.`,
-      });
-      await caseDoc.save();
+      const note = `No available rescuers found in range. Escalated to Emergency Coordinator.`;
+      if (isDbConnected()) {
+        caseDoc.timeline.push({
+          status: 'escalated_to_coordinator',
+          timestamp: new Date(),
+          note,
+        });
+        await caseDoc.save();
+
+        await Escalation.create({
+          caseId: caseDoc._id,
+          attemptNumber,
+          alertedAt: new Date(),
+          expiresAt: new Date(),
+          status: 'coordinator_escalated',
+          note: 'No available rescuers found for this animal type and location.',
+        });
+      } else {
+        updateCase(caseDoc._id, {
+          timeline: [{ status: 'escalated_to_coordinator', timestamp: new Date(), note }],
+        });
+        saveEscalation({
+          caseId: caseDoc._id,
+          attemptNumber,
+          alertedAt: new Date(),
+          expiresAt: new Date(),
+          status: 'coordinator_escalated',
+          note: 'No available rescuers found for this animal type and location.',
+        });
+      }
+
       await notificationService.notifyCoordinatorEscalation(
         caseDoc,
         'No available rescuers found for this animal type and location.'
@@ -139,48 +220,80 @@ async function dispatchCase(caseId, attemptNumber = 1) {
 
     const best = ranked[0];
     const selectedRescuer = best.rescuer;
+    const assignNote = `Attempt #${attemptNumber}: Assigned to ${selectedRescuer.organizationName || 'Rescuer'} (Score: ${best.totalScore}, Distance: ${best.distance}km)`;
+    const expiresAt = new Date(Date.now() + ESCALATION_TIMEOUT_MS);
 
-    // Update case
-    caseDoc.assignedRescuer = selectedRescuer._id;
-    caseDoc.status = 'assigned';
-    caseDoc.timeline.push({
-      status: 'assigned',
-      timestamp: new Date(),
-      note: `Attempt #${attemptNumber}: Assigned to ${selectedRescuer.organizationName || 'Rescuer'} (Score: ${best.totalScore}, Distance: ${best.distance}km)`,
-    });
-    await caseDoc.save();
+    // Update case & log escalation attempt
+    let escalationLog;
+    if (isDbConnected()) {
+      caseDoc.assignedRescuer = selectedRescuer._id;
+      caseDoc.status = 'assigned';
+      caseDoc.timeline.push({
+        status: 'assigned',
+        timestamp: new Date(),
+        note: assignNote,
+      });
+      await caseDoc.save();
 
-    // Log escalation attempt
-    const escalationLog = await Escalation.create({
-      caseId: caseDoc._id,
-      attemptNumber,
-      rescuerId: selectedRescuer._id,
-      alertedAt: new Date(),
-      status: 'pending',
-    });
+      escalationLog = await Escalation.create({
+        caseId: caseDoc._id,
+        attemptNumber,
+        rescuerId: selectedRescuer._id,
+        alertedAt: new Date(),
+        expiresAt,
+        status: 'pending',
+      });
+    } else {
+      updateCase(caseDoc._id, {
+        assignedRescuer: selectedRescuer._id,
+        status: 'assigned',
+        timeline: [{ status: 'assigned', timestamp: new Date(), note: assignNote }],
+      });
+      escalationLog = saveEscalation({
+        caseId: caseDoc._id,
+        attemptNumber,
+        rescuerId: selectedRescuer._id,
+        alertedAt: new Date(),
+        expiresAt,
+        status: 'pending',
+      });
+    }
 
     // Notify rescuer
     await notificationService.notifyRescuerNewCase(selectedRescuer, caseDoc, best);
 
-    // Clear existing timer if any
+    // Clear existing in-memory timer if any
     if (activeEscalationTimers.has(caseDoc._id.toString())) {
       clearTimeout(activeEscalationTimers.get(caseDoc._id.toString()));
     }
 
-    // Set 5-minute escalation timer
+    // Set 5-minute escalation timer (uses atomic transition so background processor and timer never collide)
     const timer = setTimeout(async () => {
       try {
-        const currentCase = await Case.findById(caseDoc._id);
-        if (currentCase && currentCase.status === 'assigned') {
-          console.log(`[ESCALATION TIMEOUT] Rescuer ${selectedRescuer._id} did not respond in 5 minutes for Case ${caseDoc._id}`);
-          escalationLog.status = 'timeout';
-          await escalationLog.save();
-
-          // Trigger next attempt
-          await dispatchCase(caseDoc._id, attemptNumber + 1);
+        const { handleExpiredEscalation } = require('./escalationProcessor');
+        if (isDbConnected()) {
+          const claimed = await Escalation.findOneAndUpdate(
+            { _id: escalationLog._id, status: 'pending' },
+            { $set: { status: 'processing', claimedAt: new Date() } },
+            { new: true }
+          );
+          if (claimed) {
+            await handleExpiredEscalation(claimed);
+          }
+        } else {
+          const current = findEscalationsByCaseId(caseDoc._id).find(
+            (e) => String(e._id) === String(escalationLog._id) && e.status === 'pending'
+          );
+          if (current) {
+            const claimed = updateEscalation(current._id, {
+              status: 'processing',
+              claimedAt: new Date(),
+            });
+            await handleExpiredEscalation(claimed);
+          }
         }
       } catch (timeoutErr) {
-        console.error('Error during escalation timeout:', timeoutErr);
+        console.error('Error during in-memory escalation timeout:', timeoutErr);
       }
     }, ESCALATION_TIMEOUT_MS);
 
@@ -202,76 +315,169 @@ async function dispatchCase(caseId, attemptNumber = 1) {
  * Rescuer accepts the assigned case
  */
 async function handleRescuerAccept(caseId, rescuerId) {
-  const caseDoc = await Case.findById(caseId);
-  if (!caseDoc) {
-    throw new Error('Case not found');
-  }
-
   // Clear escalation timer
   if (activeEscalationTimers.has(caseId.toString())) {
     clearTimeout(activeEscalationTimers.get(caseId.toString()));
     activeEscalationTimers.delete(caseId.toString());
   }
 
-  caseDoc.status = 'accepted';
-  caseDoc.assignedRescuer = rescuerId;
-  caseDoc.timeline.push({
-    status: 'accepted',
-    timestamp: new Date(),
-    note: 'Rescuer accepted the rescue assignment',
-  });
-  await caseDoc.save();
+  if (isDbConnected()) {
+    const caseDoc = await Case.findById(caseId);
+    if (!caseDoc) {
+      throw new Error('Case not found');
+    }
 
-  // Mark rescuer busy
-  await Rescuer.findByIdAndUpdate(rescuerId, {
-    activeCaseId: caseDoc._id,
-    available: false,
-  });
+    caseDoc.status = 'accepted';
+    caseDoc.assignedRescuer = rescuerId;
+    caseDoc.timeline.push({
+      status: 'accepted',
+      timestamp: new Date(),
+      note: 'Rescuer accepted the rescue assignment',
+    });
+    await caseDoc.save();
 
-  // Update escalation log
-  await Escalation.findOneAndUpdate(
-    { caseId, rescuerId, status: 'pending' },
-    { status: 'accepted' }
-  );
+    // Mark rescuer busy
+    await Rescuer.findByIdAndUpdate(rescuerId, {
+      activeCaseId: caseDoc._id,
+      available: false,
+    });
 
-  // Notify citizen
-  await notificationService.notifyCitizenStatusUpdate(caseDoc, 'Rescuer has accepted your request!');
+    // Update escalation log atomically
+    const alerted = await Escalation.findOne({
+      caseId,
+      rescuerId,
+      status: { $in: ['pending', 'processing'] },
+    });
+    const responseTimeSeconds = alerted?.alertedAt
+      ? Math.round((Date.now() - new Date(alerted.alertedAt).getTime()) / 1000)
+      : 0;
 
-  return caseDoc;
+    await Escalation.findOneAndUpdate(
+      { caseId, rescuerId, status: { $in: ['pending', 'processing'] } },
+      {
+        $set: {
+          status: 'accepted',
+          responseTimeSeconds,
+          note: 'Accepted by rescuer',
+        },
+      }
+    );
+
+    // Notify citizen
+    await notificationService.notifyCitizenStatusUpdate(caseDoc, 'Rescuer has accepted your request!');
+    return caseDoc;
+  } else {
+    const caseDoc = getCase(caseId);
+    if (!caseDoc) {
+      throw new Error('Case not found');
+    }
+
+    const updated = updateCase(caseId, {
+      status: 'accepted',
+      assignedRescuer: rescuerId,
+      timeline: [{ status: 'accepted', timestamp: new Date(), note: 'Rescuer accepted assignment' }],
+    });
+    updateRescuer(rescuerId, { activeCaseId: caseId, available: false });
+
+    const pending = findEscalationsByCaseId(caseId).find(
+      (e) => String(e.rescuerId) === String(rescuerId) && ['pending', 'processing'].includes(e.status)
+    );
+    if (pending) {
+      const responseTimeSeconds = pending.alertedAt
+        ? Math.round((Date.now() - new Date(pending.alertedAt).getTime()) / 1000)
+        : 0;
+      updateEscalation(pending._id, {
+        status: 'accepted',
+        responseTimeSeconds,
+        note: 'Accepted by rescuer',
+      });
+    }
+
+    await notificationService.notifyCitizenStatusUpdate(updated, 'Rescuer has accepted your request!');
+    return updated;
+  }
 }
 
 /**
  * Rescuer declines the assigned case
  */
 async function handleRescuerDecline(caseId, rescuerId, reason = 'Rescuer declined') {
-  const caseDoc = await Case.findById(caseId);
-  if (!caseDoc) {
-    throw new Error('Case not found');
-  }
-
   // Clear escalation timer
   if (activeEscalationTimers.has(caseId.toString())) {
     clearTimeout(activeEscalationTimers.get(caseId.toString()));
     activeEscalationTimers.delete(caseId.toString());
   }
 
-  // Mark escalation log as declined
-  const prevEscalation = await Escalation.findOneAndUpdate(
-    { caseId, rescuerId, status: 'pending' },
-    { status: 'declined', note: reason }
-  );
+  if (isDbConnected()) {
+    const caseDoc = await Case.findById(caseId);
+    if (!caseDoc) {
+      throw new Error('Case not found');
+    }
 
-  const nextAttempt = prevEscalation ? prevEscalation.attemptNumber + 1 : 2;
+    // Mark escalation log as declined atomically
+    const alerted = await Escalation.findOne({
+      caseId,
+      rescuerId,
+      status: { $in: ['pending', 'processing'] },
+    });
+    const responseTimeSeconds = alerted?.alertedAt
+      ? Math.round((Date.now() - new Date(alerted.alertedAt).getTime()) / 1000)
+      : 0;
 
-  caseDoc.timeline.push({
-    status: 'declined',
-    timestamp: new Date(),
-    note: `Rescuer declined: ${reason}. Escalating to next suitable responder.`,
-  });
-  await caseDoc.save();
+    const prevEscalation = await Escalation.findOneAndUpdate(
+      { caseId, rescuerId, status: { $in: ['pending', 'processing'] } },
+      {
+        $set: {
+          status: 'declined',
+          note: reason,
+          responseTimeSeconds,
+        },
+      }
+    );
 
-  // Immediately dispatch to next best candidate
-  return await dispatchCase(caseId, nextAttempt);
+    const nextAttempt = prevEscalation ? prevEscalation.attemptNumber + 1 : 2;
+
+    caseDoc.timeline.push({
+      status: 'declined',
+      timestamp: new Date(),
+      note: `Rescuer declined: ${reason}. Escalating to next suitable responder.`,
+    });
+    await caseDoc.save();
+
+    // Immediately dispatch to next best candidate
+    return await dispatchCase(caseId, nextAttempt);
+  } else {
+    const caseDoc = getCase(caseId);
+    if (!caseDoc) {
+      throw new Error('Case not found');
+    }
+
+    const pending = findEscalationsByCaseId(caseId).find(
+      (e) => String(e.rescuerId) === String(rescuerId) && ['pending', 'processing'].includes(e.status)
+    );
+    let nextAttempt = 2;
+    if (pending) {
+      const responseTimeSeconds = pending.alertedAt
+        ? Math.round((Date.now() - new Date(pending.alertedAt).getTime()) / 1000)
+        : 0;
+      updateEscalation(pending._id, {
+        status: 'declined',
+        note: reason,
+        responseTimeSeconds,
+      });
+      nextAttempt = pending.attemptNumber + 1;
+    }
+
+    updateCase(caseId, {
+      timeline: [{
+        status: 'declined',
+        timestamp: new Date(),
+        note: `Rescuer declined: ${reason}. Escalating to next suitable responder.`,
+      }],
+    });
+
+    return await dispatchCase(caseId, nextAttempt);
+  }
 }
 
 module.exports = {
@@ -281,4 +487,6 @@ module.exports = {
   handleRescuerAccept,
   handleRescuerDecline,
   activeEscalationTimers,
+  ESCALATION_TIMEOUT_MS,
+  MAX_DISPATCH_ATTEMPTS,
 };
