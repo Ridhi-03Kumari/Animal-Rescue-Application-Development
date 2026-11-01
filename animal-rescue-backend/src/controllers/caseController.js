@@ -1,9 +1,17 @@
+const mongoose = require('mongoose');
 const Case = require('../models/Case');
 const Rescuer = require('../models/Rescuer');
 const Animal = require('../models/Animal');
+const Escalation = require('../models/Escalation');
+const dispatchService = require('../services/dispatchService');
 const notificationService = require('../services/notificationService');
 const { generateQrCode } = require('./animalController');
 const { emitCaseEvent } = require('../socket');
+const {
+  parsePaginationParams,
+  buildPaginationMetadata,
+  paginateArray,
+} = require('../utils/pagination');
 const {
   isDbConnected,
   getCase,
@@ -43,6 +51,10 @@ const RESCUER_CAN_SET = [
 // GET /api/v1/cases/:id
 exports.getCaseById = async (req, res, next) => {
   try {
+    if (!req.params.id || (!mongoose.Types.ObjectId.isValid(req.params.id) && !getCase(req.params.id))) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
+
     let caseDoc;
     if (isDbConnected()) {
       caseDoc = await Case.findById(req.params.id)
@@ -50,7 +62,8 @@ exports.getCaseById = async (req, res, next) => {
         .populate({
           path: 'assignedRescuer',
           populate: { path: 'user', select: 'name phone' },
-        });
+        })
+        .lean();
     } else {
       caseDoc = populateCase(getCase(req.params.id));
     }
@@ -72,30 +85,49 @@ exports.getMyReports = async (req, res, next) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
+    const { page, limit, skip } = parsePaginationParams(req.query);
+
     let cases = [];
+    let pagination = null;
+
     if (isDbConnected()) {
-      cases = await Case.find({ citizen: req.user.id })
-        .sort({ createdAt: -1 })
-        .populate('assignedRescuer');
+      const filter = { citizen: req.user.id };
+      const total = await Case.countDocuments(filter);
+      pagination = buildPaginationMetadata(total, page, limit);
+
+      cases = await Case.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select('animalType description location urgency status assignedRescuer photoUrl timeline createdAt')
+        .populate({
+          path: 'assignedRescuer',
+          select: 'organizationName user location',
+          populate: { path: 'user', select: 'name phone' },
+        })
+        .lean();
     } else {
-      cases = getAllCases()
+      const allCitizenCases = getAllCases()
         .filter((c) => c.citizen === req.user.id)
         .map(populateCase);
+      const paginated = paginateArray(allCitizenCases, page, limit);
+      cases = paginated.items;
+      pagination = paginated.pagination;
     }
 
-    res.json({ success: true, count: cases.length, cases });
+    res.json({ success: true, count: cases.length, cases, pagination });
   } catch (err) {
     next(err);
   }
 };
 
-// GET /api/v1/cases (list with optional status filter)
+// GET /api/v1/cases (list with optional status filter & pagination)
 // Each role only sees its own cases: a citizen their reports, a rescuer the cases assigned to them.
 // Coordinators and admins see everything.
 exports.getAllCases = async (req, res, next) => {
   try {
     const { status, animalType } = req.query;
-    let cases = [];
+    const { page, limit, skip } = parsePaginationParams(req.query);
 
     // Work out whose cases this user may see
     let onlyCitizen = null;
@@ -104,9 +136,19 @@ exports.getAllCases = async (req, res, next) => {
       onlyCitizen = req.user.id;
     } else if (req.user.role === 'rescuer') {
       const rescuer = await findRescuerForUser(req.user.id);
-      if (!rescuer) return res.json({ success: true, count: 0, cases: [] });
+      if (!rescuer) {
+        return res.json({
+          success: true,
+          count: 0,
+          cases: [],
+          pagination: buildPaginationMetadata(0, page, limit),
+        });
+      }
       onlyRescuerId = rescuer._id;
     }
+
+    let cases = [];
+    let pagination = null;
 
     if (isDbConnected()) {
       const filter = {};
@@ -115,24 +157,34 @@ exports.getAllCases = async (req, res, next) => {
       if (onlyCitizen) filter.citizen = onlyCitizen;
       if (onlyRescuerId) filter.assignedRescuer = onlyRescuerId;
 
+      const total = await Case.countDocuments(filter);
+      pagination = buildPaginationMetadata(total, page, limit);
+
       cases = await Case.find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
         .populate('citizen', 'name phone')
         .populate({
           path: 'assignedRescuer',
           populate: { path: 'user', select: 'name phone' },
-        });
+        })
+        .lean();
     } else {
-      cases = getAllCases({ status });
+      let filtered = getAllCases({ status });
       if (animalType) {
-        cases = cases.filter((c) => (c.animalType || '').toLowerCase() === animalType.toLowerCase());
+        filtered = filtered.filter((c) => (c.animalType || '').toLowerCase() === animalType.toLowerCase());
       }
-      if (onlyCitizen) cases = cases.filter((c) => c.citizen === onlyCitizen);
-      if (onlyRescuerId) cases = cases.filter((c) => sameId(c.assignedRescuer, onlyRescuerId));
-      cases = cases.map(populateCase);
+      if (onlyCitizen) filtered = filtered.filter((c) => c.citizen === onlyCitizen);
+      if (onlyRescuerId) filtered = filtered.filter((c) => sameId(c.assignedRescuer, onlyRescuerId));
+      filtered = filtered.map(populateCase);
+
+      const paginated = paginateArray(filtered, page, limit);
+      cases = paginated.items;
+      pagination = paginated.pagination;
     }
 
-    res.json({ success: true, count: cases.length, cases });
+    res.json({ success: true, count: cases.length, cases, pagination });
   } catch (err) {
     next(err);
   }
@@ -141,6 +193,10 @@ exports.getAllCases = async (req, res, next) => {
 // PATCH /api/v1/cases/:id/status
 exports.updateCaseStatus = async (req, res, next) => {
   try {
+    if (!req.params.id || (!mongoose.Types.ObjectId.isValid(req.params.id) && !getCase(req.params.id))) {
+      return res.status(400).json({ error: 'Invalid case ID' });
+    }
+
     const { status, note, medicalNotes, treatment } = req.body;
 
     const validStatuses = [
@@ -171,6 +227,11 @@ exports.updateCaseStatus = async (req, res, next) => {
 
     if (!caseDoc) {
       return res.status(404).json({ error: 'Case not found' });
+    }
+
+    // A closed case cannot be transitioned back to an active rescue state
+    if (['completed', 'cancelled'].includes(caseDoc.status) && status !== caseDoc.status) {
+      return res.status(409).json({ error: `This case is already ${caseDoc.status} and cannot be modified` });
     }
 
     // Who may change this case (the route already requires a rescuer, coordinator or admin)
@@ -234,6 +295,18 @@ exports.updateCaseStatus = async (req, res, next) => {
       caseDoc.timeline.push(timelineEntry);
 
       if (status === 'completed' || status === 'cancelled') {
+        // Cancel any pending/processing escalations for this case
+        await Escalation.updateMany(
+          { caseId: caseDoc._id, status: { $in: ['pending', 'processing'] } },
+          { $set: { status: 'cancelled', note: `Case marked as ${status}` } }
+        );
+
+        // Clear in-memory timer
+        if (dispatchService.activeEscalationTimers && dispatchService.activeEscalationTimers.has(caseDoc._id.toString())) {
+          clearTimeout(dispatchService.activeEscalationTimers.get(caseDoc._id.toString()));
+          dispatchService.activeEscalationTimers.delete(caseDoc._id.toString());
+        }
+
         if (caseDoc.assignedRescuer && !wasClosed) {
           if (status === 'completed') {
             await Rescuer.findByIdAndUpdate(caseDoc.assignedRescuer, { $inc: { completedCasesCount: 1 } });

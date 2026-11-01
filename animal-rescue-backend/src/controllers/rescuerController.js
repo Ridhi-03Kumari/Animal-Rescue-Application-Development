@@ -8,6 +8,11 @@ const {
   updateRescuer,
   populateRescuer,
 } = require('../utils/devStore');
+const {
+  parsePaginationParams,
+  buildPaginationMetadata,
+  paginateArray,
+} = require('../utils/pagination');
 
 // POST /api/v1/rescuers/profile (Create or Update profile)
 exports.createOrUpdateProfile = async (req, res, next) => {
@@ -84,10 +89,9 @@ exports.getProfile = async (req, res, next) => {
       return res.json({ success: true, rescuer: populateRescuer(rescuer) });
     }
 
-    const rescuer = await Rescuer.findOne({ user: req.user.id }).populate(
-      'user',
-      'name phone role'
-    );
+    const rescuer = await Rescuer.findOne({ user: req.user.id })
+      .populate('user', 'name phone role')
+      .lean();
 
     if (!rescuer) {
       return res.status(404).json({ error: 'Rescuer profile not found. Please create one.' });
@@ -166,10 +170,62 @@ exports.updateLocation = async (req, res, next) => {
   }
 };
 
+// POST /api/v1/rescuers/device-token
+exports.updateDeviceToken = async (req, res, next) => {
+  try {
+    const rawToken = req.body.token || req.body.fcmToken;
+    if (!rawToken || typeof rawToken !== 'string' || !rawToken.trim()) {
+      return res.status(400).json({ error: 'Device token string is required' });
+    }
+
+    const token = rawToken.trim();
+    const userId = req.user.id;
+
+    if (!isDbConnected()) {
+      // Clear token from any other rescuer in devStore to avoid duplicate deliveries
+      const all = getAllRescuers();
+      for (const r of all) {
+        if (r.user !== userId && r.fcmToken === token) {
+          updateRescuer(r.user, { fcmToken: null });
+        }
+      }
+      let rescuer = updateRescuer(userId, { fcmToken: token });
+      if (!rescuer) {
+        rescuer = saveRescuer({ user: userId, fcmToken: token });
+      }
+      return res.status(200).json({
+        success: true,
+        message: 'Device token registered successfully',
+      });
+    }
+
+    // Remove token from any other rescuer who previously used this device
+    await Rescuer.updateMany({ fcmToken: token, user: { $ne: userId } }, { fcmToken: null });
+
+    const rescuer = await Rescuer.findOneAndUpdate(
+      { user: userId },
+      { fcmToken: token },
+      { new: true }
+    );
+
+    if (!rescuer) {
+      return res.status(404).json({ error: 'Rescuer profile not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Device token registered successfully',
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /api/v1/rescuers (List all rescuers)
 exports.listRescuers = async (req, res, next) => {
   try {
     const { available, animalType } = req.query;
+    const { page, limit, skip } = parsePaginationParams(req.query);
 
     if (!isDbConnected()) {
       let rescuers = getAllRescuers();
@@ -181,7 +237,8 @@ exports.listRescuers = async (req, res, next) => {
         rescuers = rescuers.filter((r) => (r.animalsHandled || []).includes(type));
       }
       const populated = rescuers.map(populateRescuer);
-      return res.json({ success: true, count: populated.length, rescuers: populated });
+      const { items, pagination } = paginateArray(populated, page, limit);
+      return res.json({ success: true, count: items.length, rescuers: items, pagination });
     }
 
     const filter = {};
@@ -193,9 +250,16 @@ exports.listRescuers = async (req, res, next) => {
       filter.animalsHandled = animalType.toLowerCase();
     }
 
-    const rescuers = await Rescuer.find(filter).populate('user', 'name phone role');
+    const total = await Rescuer.countDocuments(filter);
+    const rescuers = await Rescuer.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('user', 'name phone role')
+      .lean();
 
-    res.json({ success: true, count: rescuers.length, rescuers });
+    const pagination = buildPaginationMetadata(total, page, limit);
+    res.json({ success: true, count: rescuers.length, rescuers, pagination });
   } catch (err) {
     next(err);
   }

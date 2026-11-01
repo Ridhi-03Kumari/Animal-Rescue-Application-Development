@@ -20,8 +20,13 @@ const rescuerSchema = new mongoose.Schema(
     completedCasesCount: { type: Number, default: 0 },
     averageResponseTime: { type: Number, default: 0 },
     responseRate: { type: Number, default: 0.9 },
+    fcmToken: { type: String, default: null },
   },
   { timestamps: true }
 );
+
+// Indexes supporting candidate dispatch lookup and device token management
+rescuerSchema.index({ available: 1, activeCaseId: 1 });
+rescuerSchema.index({ fcmToken: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Rescuer', rescuerSchema);

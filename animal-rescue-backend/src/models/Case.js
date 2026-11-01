@@ -92,4 +92,11 @@ const caseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes supporting high-frequency application queries
+caseSchema.index({ citizen: 1, createdAt: -1, _id: -1 });
+caseSchema.index({ assignedRescuer: 1, createdAt: -1, _id: -1 });
+caseSchema.index({ assignedRescuer: 1, status: 1 });
+caseSchema.index({ status: 1, createdAt: -1, _id: -1 });
+caseSchema.index({ 'timeline.status': 1 });
+
 module.exports = mongoose.model('Case', caseSchema);

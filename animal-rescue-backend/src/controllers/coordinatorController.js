@@ -16,6 +16,11 @@ const {
   populateCase,
   populateRescuer,
 } = require('../utils/devStore');
+const {
+  parsePaginationParams,
+  buildPaginationMetadata,
+  paginateArray,
+} = require('../utils/pagination');
 
 const ESCALATION_AFTER_MS = 3 * 60 * 1000;
 const ACTIVE_STATUSES = ['assigned', 'accepted', 'on_the_way', 'reached_location', 'animal_picked_up'];
@@ -33,41 +38,72 @@ function devEscalatedCases() {
 // GET /api/v1/coordinator/cases (Cases needing manual intervention)
 exports.getEscalatedCases = async (req, res, next) => {
   try {
+    const { page, limit, skip } = parsePaginationParams(req.query);
+
     if (!isDbConnected()) {
-      const cases = devEscalatedCases().map((c) => ({ ...populateCase(c), escalationHistory: [] }));
-      return res.json({ success: true, count: cases.length, cases });
+      const allCases = devEscalatedCases().map((c) => ({ ...populateCase(c), escalationHistory: [] }));
+      const paginated = paginateArray(allCases, page, limit);
+      return res.json({
+        success: true,
+        count: paginated.items.length,
+        cases: paginated.items,
+        pagination: paginated.pagination,
+      });
     }
 
-    // Find cases with timeline entry of escalated_to_coordinator or status reported with no rescuer
-    const escalatedCases = await Case.find({
+    const filter = {
       $or: [
         { 'timeline.status': 'escalated_to_coordinator' },
         { status: 'reported', createdAt: { $lt: new Date(Date.now() - 3 * 60 * 1000) } },
       ],
       status: { $in: ['reported', 'assigned'] },
-    })
-      .sort({ updatedAt: -1 })
-      .populate('citizen', 'name phone')
-      .populate('assignedRescuer');
+    };
 
-    // Enrich with escalation attempt count
-    const enriched = await Promise.all(
-      escalatedCases.map(async (caseDoc) => {
-        const escalations = await Escalation.find({ caseId: caseDoc._id }).populate({
-          path: 'rescuerId',
-          populate: { path: 'user', select: 'name phone' },
-        });
-        return {
-          ...caseDoc.toObject(),
-          escalationHistory: escalations,
-        };
+    const total = await Case.countDocuments(filter);
+    const pagination = buildPaginationMetadata(total, page, limit);
+
+    // Find cases with deterministic sorting and lean query
+    const escalatedCases = await Case.find(filter)
+      .sort({ updatedAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('citizen', 'name phone')
+      .populate({
+        path: 'assignedRescuer',
+        select: 'organizationName user location',
+        populate: { path: 'user', select: 'name phone' },
       })
-    );
+      .lean();
+
+    // Batch query escalations to eliminate N+1 problem (1 query instead of N queries)
+    const caseIds = escalatedCases.map((c) => c._id);
+    const allEscalations = await Escalation.find({ caseId: { $in: caseIds } })
+      .populate({
+        path: 'rescuerId',
+        select: 'organizationName user',
+        populate: { path: 'user', select: 'name phone' },
+      })
+      .lean();
+
+    const escalationsByCase = new Map();
+    allEscalations.forEach((esc) => {
+      const cid = esc.caseId.toString();
+      if (!escalationsByCase.has(cid)) {
+        escalationsByCase.set(cid, []);
+      }
+      escalationsByCase.get(cid).push(esc);
+    });
+
+    const enriched = escalatedCases.map((caseDoc) => ({
+      ...caseDoc,
+      escalationHistory: escalationsByCase.get(caseDoc._id.toString()) || [],
+    }));
 
     res.json({
       success: true,
       count: enriched.length,
       cases: enriched,
+      pagination,
     });
   } catch (err) {
     next(err);

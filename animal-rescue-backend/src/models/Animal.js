@@ -56,4 +56,8 @@ const animalSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes supporting case-linked animal profile lookup and public gallery queries
+animalSchema.index({ caseId: 1 });
+animalSchema.index({ status: 1, rescueDate: -1, _id: -1 });
+
 module.exports = mongoose.model('Animal', animalSchema);

@@ -8,6 +8,7 @@ router.get('/profile', protect, authorize('rescuer'), rescuerController.getProfi
 router.post('/profile', protect, authorize('rescuer'), rescuerController.createOrUpdateProfile);
 router.patch('/availability', protect, authorize('rescuer'), rescuerController.updateAvailability);
 router.patch('/location', protect, authorize('rescuer'), rescuerController.updateLocation);
+router.post('/device-token', protect, authorize('rescuer'), rescuerController.updateDeviceToken);
 
 // List rescuers (includes phone numbers, so staff only)
 router.get('/', protect, authorize('coordinator', 'admin'), rescuerController.listRescuers);

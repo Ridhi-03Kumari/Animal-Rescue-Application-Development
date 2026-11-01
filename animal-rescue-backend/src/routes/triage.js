@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { assessUrgency } = require('../services/aiTriageService');
+const { triageLimiter } = require('../middleware/rateLimiter');
 
 // POST /api/v1/triage
-router.post('/', async (req, res, next) => {
+router.post('/', triageLimiter, async (req, res, next) => {
   try {
     const { animalType, description, photoUrl } = req.body;
     const triageResult = await assessUrgency({

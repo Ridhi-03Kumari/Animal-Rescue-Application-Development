@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const QRCode = require('qrcode');
 const Animal = require('../models/Animal');
 const Case = require('../models/Case');
@@ -9,6 +10,11 @@ const {
   updateAnimal,
   saveAnimal,
 } = require('../utils/devStore');
+const {
+  parsePaginationParams,
+  buildPaginationMetadata,
+  paginateArray,
+} = require('../utils/pagination');
 
 /**
  * Generate QR code data URL for an animal record
@@ -35,17 +41,23 @@ async function generateQrCode(animalId, caseId) {
 exports.listAnimals = async (req, res, next) => {
   try {
     const { status, animalType } = req.query;
+    const { page, limit, skip } = parsePaginationParams(req.query);
 
     if (isDbConnected()) {
       const filter = {};
       if (status) filter.status = status;
       if (animalType) filter.animalType = animalType.toLowerCase();
 
+      const total = await Animal.countDocuments(filter);
       const animals = await Animal.find(filter)
-        .sort({ rescueDate: -1 })
-        .populate('caseId', 'reporterName location urgency status');
+        .sort({ rescueDate: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('caseId', 'reporterName location urgency status')
+        .lean();
 
-      return res.json({ success: true, count: animals.length, animals });
+      const pagination = buildPaginationMetadata(total, page, limit);
+      return res.json({ success: true, count: animals.length, animals, pagination });
     }
 
     // In-memory demo mode
@@ -54,7 +66,8 @@ exports.listAnimals = async (req, res, next) => {
     if (animalType) {
       animals = animals.filter((a) => (a.animalType || '').toLowerCase() === animalType.toLowerCase());
     }
-    res.json({ success: true, count: animals.length, animals });
+    const { items, pagination } = paginateArray(animals, page, limit);
+    res.json({ success: true, count: items.length, animals: items, pagination });
   } catch (err) {
     next(err);
   }
@@ -63,9 +76,14 @@ exports.listAnimals = async (req, res, next) => {
 // GET /api/v1/animals/:id
 exports.getAnimalById = async (req, res, next) => {
   try {
+    const { id } = req.params;
+    if (!id || (!mongoose.Types.ObjectId.isValid(id) && !getAnimalById(id))) {
+      return res.status(400).json({ error: 'Invalid animal ID' });
+    }
+
     let animal;
     if (isDbConnected()) {
-      animal = await Animal.findById(req.params.id).populate('caseId');
+      animal = await Animal.findById(req.params.id).populate('caseId').lean();
     } else {
       animal = getAnimalById(req.params.id);
     }
@@ -85,7 +103,7 @@ exports.getAnimalByCaseId = async (req, res, next) => {
   try {
     let animal;
     if (isDbConnected()) {
-      animal = await Animal.findOne({ caseId: req.params.caseId }).populate('caseId');
+      animal = await Animal.findOne({ caseId: req.params.caseId }).populate('caseId').lean();
     } else {
       animal = getAnimalByCaseId(req.params.caseId);
     }
@@ -213,6 +231,11 @@ exports.createAnimalProfile = async (req, res, next) => {
 // PATCH /api/v1/animals/:id
 exports.updateAnimalProfile = async (req, res, next) => {
   try {
+    const { id } = req.params;
+    if (!id || (!mongoose.Types.ObjectId.isValid(id) && !getAnimalById(id))) {
+      return res.status(400).json({ error: 'Invalid animal ID' });
+    }
+
     const { name, photos, identifyingMarkings, medicalNotes, treatment, status } = req.body;
 
     const validStatuses = ['in_treatment', 'sheltered', 'adopted', 'released', 'deceased'];
