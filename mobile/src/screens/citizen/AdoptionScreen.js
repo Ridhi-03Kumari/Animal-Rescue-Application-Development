@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   TextInput,
   Modal,
   ScrollView,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppButton from '../../components/AppButton';
@@ -15,7 +17,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import SegmentedNav from '../../components/SegmentedNav';
 import { Accent } from '../../components/Heading';
 import { Paw } from '../../components/Doodles';
-import { ADOPTABLE_PETS } from '../../data/adoptablePets';
+import api from '../../services/api';
 import { getAdoptionRequests, saveAdoptionRequest } from '../../services/storage';
 import { colors, fonts } from '../../theme';
 import { rs } from '../../responsive';
@@ -36,6 +38,10 @@ const EMPTY_FORM = { name: '', phone: '', area: '', reason: '' };
 
 export default function AdoptionScreen({ navigation }) {
   const [filter, setFilter] = useState('all');
+  const [pets, setPets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [requests, setRequests] = useState([]);
   const [selectedPet, setSelectedPet] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -43,11 +49,34 @@ export default function AdoptionScreen({ navigation }) {
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const fetchAdoptions = useCallback(async (activeFilter = filter) => {
+    try {
+      setLoadError('');
+      const params = { status: 'available' };
+      if (activeFilter !== 'all') {
+        params.species = activeFilter;
+      }
+      const res = await api.getAdoptions(params);
+      setPets(res.items || res.adoptions || []);
+    } catch (err) {
+      setLoadError(err.message || 'Could not load adoptable pets.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [filter]);
+
   useEffect(() => {
     getAdoptionRequests().then(setRequests);
-  }, []);
+    fetchAdoptions('all');
+  }, [fetchAdoptions]);
 
-  const pets = ADOPTABLE_PETS.filter((p) => filter === 'all' || p.type === filter);
+  const handleFilterChange = (newFilter) => {
+    setFilter(newFilter);
+    setLoading(true);
+    fetchAdoptions(newFilter);
+  };
+
   const requestedIds = requests.map((r) => r.petId);
 
   const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -55,7 +84,6 @@ export default function AdoptionScreen({ navigation }) {
   const openForm = async (pet) => {
     setErrorMsg('');
     setSuccessMsg('');
-    // Pre-fill name and phone if the citizen is signed in
     let prefill = EMPTY_FORM;
     try {
       const stored = await AsyncStorage.getItem('user_profile');
@@ -85,30 +113,40 @@ export default function AdoptionScreen({ navigation }) {
     }
 
     setSubmitting(true);
-    const request = {
-      id: `ADOPT${Date.now()}`,
-      petId: selectedPet.id,
-      petName: selectedPet.name,
-      petType: selectedPet.type,
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      area: form.area.trim(),
-      reason: form.reason.trim(),
-      status: 'Pending review',
-      createdAt: new Date().toISOString(),
-    };
+    setErrorMsg('');
 
-    const saved = await saveAdoptionRequest(request);
-    setSubmitting(false);
+    const targetId = selectedPet._id || selectedPet.id;
 
-    if (!saved) {
-      setErrorMsg('Could not save your request. Please try again.');
-      return;
+    try {
+      const res = await api.submitAdoptionRequest(targetId, {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        area: form.area.trim(),
+        reason: form.reason.trim(),
+      });
+
+      const request = {
+        id: res.request?._id || `ADOPT${Date.now()}`,
+        petId: targetId,
+        petName: selectedPet.name,
+        petType: selectedPet.species || selectedPet.type,
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        area: form.area.trim(),
+        reason: form.reason.trim(),
+        status: 'Pending review',
+        createdAt: new Date().toISOString(),
+      };
+
+      await saveAdoptionRequest(request);
+      setRequests((prev) => [request, ...prev]);
+      setSuccessMsg(`Request sent for ${selectedPet.name}. A rescue volunteer will contact you on ${request.phone}.`);
+      closeForm();
+    } catch (err) {
+      setErrorMsg(err.message || 'Could not submit adoption request. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
-
-    setRequests((prev) => [request, ...prev]);
-    setSuccessMsg(`Request sent for ${selectedPet.name}. A rescue volunteer will contact you on ${request.phone}.`);
-    closeForm();
   };
 
   return (
@@ -131,6 +169,16 @@ export default function AdoptionScreen({ navigation }) {
         />
       }
       scroll
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            fetchAdoptions();
+          }}
+          tintColor={colors.forest}
+        />
+      }
       contentStyle={styles.content}
     >
       {successMsg ? (
@@ -147,23 +195,47 @@ export default function AdoptionScreen({ navigation }) {
         items={FILTERS.map((item) => ({
           key: item.id,
           label: item.label,
-          onPress: () => setFilter(item.id),
+          onPress: () => handleFilterChange(item.id),
         }))}
       />
 
-      {pets.length === 0 ? (
+      {loading ? (
+        <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.forest} />
+          <Text maxFontSizeMultiplier={1.3} style={{ marginTop: 12, color: colors.muted, fontSize: rs(14) }}>
+            Loading adoptable pets...
+          </Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.errorBox}>
+          <Text maxFontSizeMultiplier={1.3} style={styles.errorText}>{loadError}</Text>
+          <AppButton
+            title="Retry"
+            size="sm"
+            variant="outline"
+            style={{ marginTop: 10 }}
+            onPress={() => {
+              setLoading(true);
+              fetchAdoptions(filter);
+            }}
+          />
+        </View>
+      ) : pets.length === 0 ? (
         <View style={styles.emptyCard}>
           <Text maxFontSizeMultiplier={1.3} style={styles.emptyTitle}>No animals in this group yet</Text>
           <Text maxFontSizeMultiplier={1.3} style={styles.emptyText}>Check back soon, new rescues are added regularly.</Text>
         </View>
       ) : (
         pets.map((pet) => {
-          const requested = requestedIds.includes(pet.id);
+          const petId = pet._id || pet.id;
+          const requested = requestedIds.includes(petId);
           return (
-            <View key={pet.id} style={styles.card}>
+            <View key={petId} style={styles.card}>
               <View style={styles.cardTop}>
-                {PHOTOS[pet.photo] ? (
-                  <Image source={PHOTOS[pet.photo]} style={styles.petPhoto} />
+                {pet.photos && pet.photos.length > 0 ? (
+                  <Image source={{ uri: pet.photos[0] }} style={styles.petPhoto} />
+                ) : PHOTOS[pet.photo || pet.species] ? (
+                  <Image source={PHOTOS[pet.photo || pet.species]} style={styles.petPhoto} />
                 ) : (
                   <View style={styles.petAvatar}>
                     <Paw size={rs(52)} color="rgba(14, 75, 67, 0.55)" />
@@ -173,9 +245,9 @@ export default function AdoptionScreen({ navigation }) {
 
                 <View style={styles.petInfo}>
                   <Text maxFontSizeMultiplier={1.3} style={styles.petName}>{pet.name}</Text>
-                  <Text maxFontSizeMultiplier={1.3} style={styles.petBreed}>{pet.breed}</Text>
+                  <Text maxFontSizeMultiplier={1.3} style={styles.petBreed}>{pet.breed || 'Indie mix'}</Text>
                   <Text maxFontSizeMultiplier={1.3} style={styles.petMeta}>
-                    {pet.age}  ·  {pet.gender}  ·  {pet.size}
+                    {pet.age || 'Unknown'}  ·  {pet.gender || 'Unknown'}  ·  {pet.size || 'Medium'}
                   </Text>
 
                   <View style={styles.tagRow}>
@@ -185,7 +257,7 @@ export default function AdoptionScreen({ navigation }) {
                     {pet.sterilised ? (
                       <Text maxFontSizeMultiplier={1.3} style={[styles.tag, styles.tagGood]}>Sterilised</Text>
                     ) : null}
-                    {pet.temperament.map((t) => (
+                    {(pet.temperament || []).map((t) => (
                       <Text maxFontSizeMultiplier={1.3} key={t} style={styles.tag}>
                         {t}
                       </Text>
@@ -194,8 +266,10 @@ export default function AdoptionScreen({ navigation }) {
                 </View>
               </View>
 
-              <Text maxFontSizeMultiplier={1.3} style={styles.story}>{pet.story}</Text>
-              <Text maxFontSizeMultiplier={1.3} style={styles.rescuedFrom}>Rescued from {pet.rescuedFrom}, Bengaluru</Text>
+              <Text maxFontSizeMultiplier={1.3} style={styles.story}>{pet.description || pet.story || 'Looking for a loving home.'}</Text>
+              <Text maxFontSizeMultiplier={1.3} style={styles.rescuedFrom}>
+                Location: {pet.location || pet.rescuedFrom || 'Bengaluru'}
+              </Text>
 
               <AppButton
                 title={requested ? 'Request Sent' : `Apply to Adopt ${pet.name}`}

@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSession } from '../context/SessionContext';
+import { registerForPushNotificationsAsync, setupNotificationListeners } from '../services/notifications';
 import { colors } from '../theme';
+
+export const navigationRef = createNavigationContainerRef();
 
 // Shared
 import WelcomeScreen from '../screens/shared/WelcomeScreen';
@@ -26,10 +29,29 @@ import AnimalQrScreen from '../screens/rescuer/AnimalQrScreen';
 import RescuerProfileScreen from '../screens/rescuer/RescuerProfileScreen';
 import RescuerHistoryScreen from '../screens/rescuer/RescuerHistoryScreen';
 
+// Coordinator Screens
+import CoordinatorHomeScreen from '../screens/coordinator/CoordinatorHomeScreen';
+import EscalatedCasesScreen from '../screens/coordinator/EscalatedCasesScreen';
+import ActiveCasesScreen from '../screens/coordinator/ActiveCasesScreen';
+import CoordinatorCaseDetailScreen from '../screens/coordinator/CoordinatorCaseDetailScreen';
+import RescuerSelectionScreen from '../screens/coordinator/RescuerSelectionScreen';
+import CoordinatorRescuersScreen from '../screens/coordinator/CoordinatorRescuersScreen';
+import CoordinatorProfileScreen from '../screens/coordinator/CoordinatorProfileScreen';
+
 const Stack = createNativeStackNavigator();
 
 // Screens only exist for the side the user belongs to, so a citizen can never open a rescuer screen
 // (and the other way round). Signing in or out swaps the whole set and starts at its first screen.
+const coordinatorScreens = [
+  <Stack.Screen key="CoordinatorHome" name="CoordinatorHome" component={CoordinatorHomeScreen} />,
+  <Stack.Screen key="EscalatedCases" name="EscalatedCases" component={EscalatedCasesScreen} />,
+  <Stack.Screen key="ActiveCases" name="ActiveCases" component={ActiveCasesScreen} />,
+  <Stack.Screen key="CoordinatorCaseDetail" name="CoordinatorCaseDetail" component={CoordinatorCaseDetailScreen} />,
+  <Stack.Screen key="RescuerSelection" name="RescuerSelection" component={RescuerSelectionScreen} />,
+  <Stack.Screen key="CoordinatorRescuers" name="CoordinatorRescuers" component={CoordinatorRescuersScreen} />,
+  <Stack.Screen key="CoordinatorProfile" name="CoordinatorProfile" component={CoordinatorProfileScreen} />,
+];
+
 const citizenScreens = [
   <Stack.Screen key="CitizenHome" name="CitizenHome" component={CitizenHomeScreen} />,
   <Stack.Screen key="ReportEmergency" name="ReportEmergency" component={ReportEmergencyScreen} />,
@@ -53,6 +75,17 @@ const rescuerScreens = [
 export default function RootNavigator() {
   const { user, ready } = useSession();
 
+  // Register push notifications when authenticated as a rescuer
+  useEffect(() => {
+    if (user && user.role === 'rescuer') {
+      registerForPushNotificationsAsync();
+      const unsubscribe = setupNotificationListeners(navigationRef);
+      return () => {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      };
+    }
+  }, [user?.role]);
+
   // Wait until the saved login (if any) has been read, so the right side opens first
   if (!ready) {
     return (
@@ -63,7 +96,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           // Not signed in: the start page, the login page, and the citizen side (a guest may report an animal)
@@ -74,6 +107,8 @@ export default function RootNavigator() {
           ]
         ) : user.role === 'rescuer' ? (
           rescuerScreens
+        ) : user.role === 'coordinator' || user.role === 'admin' ? (
+          coordinatorScreens
         ) : (
           citizenScreens
         )}
