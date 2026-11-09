@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -41,31 +42,78 @@ const ANIMAL_TYPES = [
 export default function ReportEmergencyScreen({ navigation }) {
   const { user } = useSession();
   const [photo, setPhoto] = useState(null);
+  const [photoAsset, setPhotoAsset] = useState(null);
   const [animalType, setAnimalType] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
 
-  const pickPhoto = async () => {
-    const permission =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const takePhotoWithCamera = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
 
-    if (!permission.granted) {
-      notify('Permission needed', 'Please allow photo access to report an injured animal.');
-      return;
-    }
+      if (!permission.granted) {
+        Alert.alert(
+          'Camera Permission Needed',
+          'Camera access is needed to take a photo. You can allow it in your phone settings.'
+        );
+        return;
+      }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      quality: 0.8,
-    });
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
 
-    if (!result.canceled) {
-      setPhoto(result.assets[0].uri);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setPhoto(asset.uri);
+        setPhotoAsset(asset);
+      }
+    } catch (err) {
+      console.log('Camera error:', err.message);
+      Alert.alert(
+        'Camera Error',
+        'Could not open camera. Please try choosing from your gallery instead.'
+      );
     }
   };
+
+  const choosePhotoFromGallery = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          'Photo Access Needed',
+          'Photo access is needed to choose an image from your gallery. You can allow it in your phone settings.'
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setPhoto(asset.uri);
+        setPhotoAsset(asset);
+      }
+    } catch (err) {
+      console.log('Gallery error:', err.message);
+      Alert.alert(
+        'Gallery Error',
+        'Could not open photo gallery. Please try again or take a photo with your camera.'
+      );
+    }
+  };
+
+  const pickPhoto = choosePhotoFromGallery;
 
   const getLocation = async () => {
     setLocationError('');
@@ -111,24 +159,7 @@ export default function ReportEmergencyScreen({ navigation }) {
   // A ref reacts instantly, unlike state, so a second tap in the same moment is ignored too
   const sendingRef = useRef(false);
 
-  const submitReport = async () => {
-    if (sendingRef.current) return;
-
-    if (!photo) {
-      notify('Missing photo', 'Please add a photo of the animal.');
-      return;
-    }
-
-    if (!animalType) {
-      notify('Missing animal type', 'Please select the animal type.');
-      return;
-    }
-
-    if (!location) {
-      notify('Missing location', 'Please allow location access and get your current location.');
-      return;
-    }
-
+  const proceedWithReportSubmission = async (photoUrlToSend) => {
     sendingRef.current = true;
     setSubmitting(true);
 
@@ -136,7 +167,7 @@ export default function ReportEmergencyScreen({ navigation }) {
       const response = await api.submitReport({
         animalType,
         description,
-        photoUrl: photo,
+        photoUrl: photoUrlToSend || null,
         latitude: location.latitude,
         longitude: location.longitude,
         address: location.address || '',
@@ -157,7 +188,7 @@ export default function ReportEmergencyScreen({ navigation }) {
         id: caseResult._id,
         animalType,
         description,
-        photo,
+        photo: photoUrlToSend || photo,
         location,
         urgency: triageResult.urgency,
         guidance: triageResult.guidance,
@@ -184,6 +215,78 @@ export default function ReportEmergencyScreen({ navigation }) {
     }
   };
 
+  const submitReport = async () => {
+    if (sendingRef.current) return;
+
+    if (!photo) {
+      notify('Missing photo', 'Please add a photo of the animal.');
+      return;
+    }
+
+    if (!animalType) {
+      notify('Missing animal type', 'Please select the animal type.');
+      return;
+    }
+
+    if (!location) {
+      notify('Missing location', 'Please allow location access and get your current location.');
+      return;
+    }
+
+    sendingRef.current = true;
+    setSubmitting(true);
+
+    let uploadedPhotoUrl = null;
+
+    // Upload local image to backend/Cloudinary before submitting report
+    if (photo && (photo.startsWith('file://') || photo.startsWith('blob:') || photo.startsWith('content://') || photo.startsWith('ph://'))) {
+      try {
+        uploadedPhotoUrl = await api.uploadPhoto(photoAsset || photo);
+      } catch (uploadErr) {
+        console.log('Photo upload failed:', uploadErr.message);
+        sendingRef.current = false;
+        setSubmitting(false);
+
+        const promptTitle = 'Photo Upload Failed';
+        const promptMsg = `${uploadErr.message || 'Could not upload the animal photo.'}\n\nWould you like to retry or continue without the photo so responders are alerted immediately?`;
+
+        if (Platform.OS === 'web') {
+          const retry = typeof window !== 'undefined'
+            ? window.confirm(`${promptTitle}\n\n${promptMsg}\n\nClick OK to retry upload, or Cancel to continue without photo.`)
+            : false;
+          if (retry) {
+            submitReport();
+          } else {
+            proceedWithReportSubmission(null);
+          }
+        } else {
+          Alert.alert(
+            promptTitle,
+            promptMsg,
+            [
+              {
+                text: 'Retry Upload',
+                onPress: () => submitReport(),
+              },
+              {
+                text: 'Continue Without Photo',
+                style: 'destructive',
+                onPress: () => proceedWithReportSubmission(null),
+              },
+            ],
+            { cancelable: false }
+          );
+        }
+        return;
+      }
+    } else {
+      // Already an HTTPS URL
+      uploadedPhotoUrl = photo;
+    }
+
+    await proceedWithReportSubmission(uploadedPhotoUrl);
+  };
+
   return (
     <ScreenBackground
       header={
@@ -208,15 +311,87 @@ export default function ReportEmergencyScreen({ navigation }) {
     >
         <Text maxFontSizeMultiplier={1.3} style={styles.label}>Animal Photo</Text>
 
-        <TouchableOpacity style={styles.photoBox} onPress={pickPhoto} activeOpacity={0.9}>
-          {photo ? (
-            <Image source={{ uri: photo }} style={styles.photo} />
-          ) : (
-            <Text maxFontSizeMultiplier={1.3} style={styles.photoText}>
-              Tap to choose a photo
-            </Text>
-          )}
-        </TouchableOpacity>
+        {photo ? (
+          /* High-End Photo Preview Card */
+          <View style={styles.previewCard}>
+            <Image source={{ uri: photo }} style={styles.previewImage} resizeMode="cover" />
+
+            {/* Top Right Status Badge */}
+            <View style={styles.previewBadge}>
+              <Text style={styles.previewBadgeText}>✓ Photo Attached</Text>
+            </View>
+
+            {/* Bottom Floating Actions Bar */}
+            <View style={styles.previewActionsBar}>
+              <TouchableOpacity
+                style={styles.previewActionBtn}
+                onPress={takePhotoWithCamera}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.previewActionIcon}>📷</Text>
+                <Text style={styles.previewActionText}>Retake</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.previewActionBtn}
+                onPress={choosePhotoFromGallery}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.previewActionIcon}>🖼️</Text>
+                <Text style={styles.previewActionText}>Gallery</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.previewActionBtn, styles.removeBtn]}
+                onPress={() => {
+                  setPhoto(null);
+                  setPhotoAsset(null);
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.previewActionIcon}>✕</Text>
+                <Text style={[styles.previewActionText, { color: colors.red }]}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          /* Dual Direct-Action Cards (Interactive, Clean, Zero-Fluff) */
+          <View style={styles.photoChoiceGrid}>
+            {/* 1. Live Camera Direct Action */}
+            <TouchableOpacity
+              style={[styles.choiceCard, styles.cameraChoiceCard]}
+              onPress={takePhotoWithCamera}
+              activeOpacity={0.88}
+            >
+              <View style={styles.cameraIconCircle}>
+                <Text style={styles.cameraIconText}>📷</Text>
+              </View>
+              <Text maxFontSizeMultiplier={1.3} style={styles.cameraChoiceTitle}>
+                Take Photo
+              </Text>
+              <Text maxFontSizeMultiplier={1.3} style={styles.cameraChoiceSubtitle}>
+                Open live camera
+              </Text>
+            </TouchableOpacity>
+
+            {/* 2. Gallery Direct Action */}
+            <TouchableOpacity
+              style={[styles.choiceCard, styles.galleryChoiceCard]}
+              onPress={choosePhotoFromGallery}
+              activeOpacity={0.88}
+            >
+              <View style={styles.galleryIconCircle}>
+                <Text style={styles.galleryIconText}>🖼️</Text>
+              </View>
+              <Text maxFontSizeMultiplier={1.3} style={styles.galleryChoiceTitle}>
+                From Gallery
+              </Text>
+              <Text maxFontSizeMultiplier={1.3} style={styles.galleryChoiceSubtitle}>
+                Choose existing photo
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text maxFontSizeMultiplier={1.3} style={styles.label}>Animal Type</Text>
 
@@ -312,28 +487,161 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
-  photoBox: {
-    height: 200,
-    borderWidth: 1.5,
-    borderColor: colors.sageDeep,
-    borderStyle: 'dashed',
-    borderRadius: 20,
-    backgroundColor: colors.sage,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+  // Dual Choice Direct Actions
+  photoChoiceGrid: {
+    flexDirection: 'row',
+    gap: 12,
     marginBottom: 20,
   },
+  choiceCard: {
+    flex: 1,
+    minHeight: 140,
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+  },
+  cameraChoiceCard: {
+    backgroundColor: colors.forest,
+    borderWidth: 1.5,
+    borderColor: colors.forestDark,
+  },
+  galleryChoiceCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  cameraIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  cameraIconText: {
+    fontSize: rs(22),
+  },
+  galleryIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.sage,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  galleryIconText: {
+    fontSize: rs(22),
+  },
+  cameraChoiceTitle: {
+    fontFamily: fonts.display,
+    fontSize: rs(18),
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+    marginBottom: 3,
+    textAlign: 'center',
+  },
+  cameraChoiceSubtitle: {
+    fontSize: rs(12),
+    color: colors.sage,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  galleryChoiceTitle: {
+    fontFamily: fonts.display,
+    fontSize: rs(18),
+    color: colors.forestDark,
+    letterSpacing: 0.3,
+    marginBottom: 3,
+    textAlign: 'center',
+  },
+  galleryChoiceSubtitle: {
+    fontSize: rs(12),
+    color: colors.muted,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
 
-  photo: {
+  // Preview Card
+  previewCard: {
+    height: 240,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+    borderWidth: 2,
+    borderColor: colors.forest,
+    marginBottom: 20,
+    position: 'relative',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+  },
+  previewImage: {
     width: '100%',
     height: '100%',
   },
-
-  photoText: {
-    color: colors.forest,
-    fontSize: rs(17),
+  previewBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(14, 75, 67, 0.92)',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  previewBadgeText: {
+    color: '#FFFFFF',
+    fontSize: rs(12),
     fontWeight: '700',
+  },
+  previewActionsBar: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  previewActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+  },
+  removeBtn: {
+    backgroundColor: 'rgba(255, 245, 245, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 75, 66, 0.3)',
+  },
+  previewActionIcon: {
+    fontSize: rs(13),
+    marginRight: 4,
+  },
+  previewActionText: {
+    fontSize: rs(12),
+    fontWeight: '700',
+    color: colors.ink,
   },
 
   typeContainer: {

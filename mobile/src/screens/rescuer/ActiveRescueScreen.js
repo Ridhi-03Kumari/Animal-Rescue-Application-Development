@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,15 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../../services/api';
+import socketService from '../../services/socket';
+import { getCurrentCoordinates } from '../../services/location';
 import { notify } from '../../services/notify';
 import { showRescuerActionError } from '../../services/rescuerErrors';
 import AppButton from '../../components/AppButton';
 import ScreenBackground from '../../components/ScreenBackground';
 import ScreenHeader from '../../components/ScreenHeader';
 import SegmentedNav from '../../components/SegmentedNav';
+import RescueMapView from '../../components/RescueMapView';
 import { Accent } from '../../components/Heading';
 import { colors, fonts } from '../../theme';
 import { rs } from '../../responsive';
@@ -36,6 +39,7 @@ export default function ActiveRescueScreen({ route, navigation }) {
   const [updating, setUpdating] = useState(false);
   const [medicalNotes, setMedicalNotes] = useState('');
   const [treatment, setTreatment] = useState('');
+  const [rescuerCoords, setRescuerCoords] = useState(null);
 
   // `quiet` = a background refresh: no spinner, and notes the rescuer is typing are not overwritten
   const loadCase = useCallback(
@@ -55,15 +59,113 @@ export default function ActiveRescueScreen({ route, navigation }) {
     [caseId]
   );
 
-  // Load when the screen opens, then keep the real status fresh while it is open
+  const locationTimerRef = useRef(null);
+  const pollingTimerRef = useRef(null);
+
+  // Realtime Socket subscription & Fallback Polling
   useFocusEffect(
     useCallback(() => {
       if (!caseId) return undefined;
       loadCase(false);
-      const timer = setInterval(() => loadCase(true), 6000);
-      return () => clearInterval(timer);
+
+      let unsubscribeSocket = null;
+
+      const startFallbackPolling = () => {
+        if (!pollingTimerRef.current) {
+          pollingTimerRef.current = setInterval(() => loadCase(true), 6000);
+        }
+      };
+
+      const stopFallbackPolling = () => {
+        if (pollingTimerRef.current) {
+          clearInterval(pollingTimerRef.current);
+          pollingTimerRef.current = null;
+        }
+      };
+
+      const handleCaseUpdate = (data) => {
+        if (data && String(data.caseId) === String(caseId)) {
+          setCaseData((prev) => {
+            if (!prev) return data.case || null;
+            return {
+              ...prev,
+              status: data.status || prev.status,
+              assignedRescuer: data.case?.assignedRescuer || prev.assignedRescuer,
+              timeline: data.case?.timeline || prev.timeline,
+              ...(data.case || {}),
+            };
+          });
+        }
+      };
+
+      socketService
+        .joinCase(caseId, handleCaseUpdate)
+        .then((cleanup) => {
+          unsubscribeSocket = cleanup;
+        })
+        .catch(() => {
+          startFallbackPolling();
+        });
+
+      const unsubConn = socketService.onConnectionChange((connected) => {
+        if (connected) {
+          stopFallbackPolling();
+        } else {
+          startFallbackPolling();
+        }
+      });
+
+      return () => {
+        stopFallbackPolling();
+        unsubConn();
+        if (unsubscribeSocket) unsubscribeSocket();
+      };
     }, [caseId, loadCase])
   );
+
+  // Rescuer live GPS streaming while active rescue is in progress (~5 second throttled interval)
+  useEffect(() => {
+    const isTrackingActive =
+      caseData?.status &&
+      ['accepted', 'on_the_way', 'reached_location', 'animal_picked_up'].includes(caseData.status);
+
+    if (!isTrackingActive || !caseId) {
+      if (locationTimerRef.current) {
+        clearInterval(locationTimerRef.current);
+        locationTimerRef.current = null;
+      }
+      return;
+    }
+
+    const streamLocation = async () => {
+      try {
+        const coords = await getCurrentCoordinates();
+        if (coords && coords.latitude && coords.longitude) {
+          setRescuerCoords(coords);
+          socketService.sendLocationUpdate({
+            caseId,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          });
+        }
+      } catch (e) {
+        // GPS unavailable or permissions denied: fail silently without disrupting the rescuer UI
+      }
+    };
+
+    // Immediate initial ping
+    streamLocation();
+
+    // Periodic 5-second stream
+    locationTimerRef.current = setInterval(streamLocation, 5000);
+
+    return () => {
+      if (locationTimerRef.current) {
+        clearInterval(locationTimerRef.current);
+        locationTimerRef.current = null;
+      }
+    };
+  }, [caseId, caseData?.status]);
 
   const updateStatus = async (newStatus) => {
     try {
@@ -208,6 +310,16 @@ export default function ActiveRescueScreen({ route, navigation }) {
             </>
           ) : null}
         </View>
+
+        {/* Live Rescue Map & Navigation */}
+        <RescueMapView
+          caseLocation={caseData.location}
+          responderLocation={rescuerCoords}
+          isLiveConnected={true}
+          caseStatus={caseData.status}
+          animalType={caseData.animalType || 'Animal'}
+          isRescuer={true}
+        />
 
         {/* Not accepted yet: accept first, then the progress buttons appear */}
         {canAccept && (

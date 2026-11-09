@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import api from '../../services/api';
 import { showRescuerActionError } from '../../services/rescuerErrors';
@@ -16,13 +17,48 @@ import { colors, fonts } from '../../theme';
 import { rs } from '../../responsive';
 
 export default function RescueRequestScreen({ route, navigation }) {
-  const { caseItem } = route.params || {};
+  const initialCase = route.params?.caseItem || null;
+  const targetCaseId = route.params?.caseId || initialCase?._id;
+
+  const [caseItem, setCaseItem] = useState(initialCase);
+  const [loadingCase, setLoadingCase] = useState(!initialCase && Boolean(targetCaseId));
+  const [loadError, setLoadError] = useState('');
   const [acting, setActing] = useState(false);
+
+  useEffect(() => {
+    if (!caseItem && targetCaseId) {
+      setLoadingCase(true);
+      api
+        .getCaseById(targetCaseId)
+        .then((res) => {
+          if (res.case) {
+            setCaseItem(res.case);
+          } else {
+            setLoadError('Case not found');
+          }
+        })
+        .catch((err) => setLoadError(err.message || 'Could not load case details'))
+        .finally(() => setLoadingCase(false));
+    }
+  }, [targetCaseId]);
+
+  if (loadingCase) {
+    return (
+      <ScreenBackground style={styles.center}>
+        <ActivityIndicator size="large" color={colors.forest} />
+        <Text maxFontSizeMultiplier={1.3} style={[styles.errorText, { color: colors.slate, marginTop: 16 }]}>
+          Loading rescue alert details...
+        </Text>
+      </ScreenBackground>
+    );
+  }
 
   if (!caseItem) {
     return (
       <ScreenBackground style={styles.center}>
-        <Text maxFontSizeMultiplier={1.3} style={styles.errorText}>No alert details found</Text>
+        <Text maxFontSizeMultiplier={1.3} style={styles.errorText}>
+          {loadError || 'No alert details found'}
+        </Text>
         <AppButton title="Return to Dashboard" size="md" onPress={() => navigation.goBack()} />
       </ScreenBackground>
     );

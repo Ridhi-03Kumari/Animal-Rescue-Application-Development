@@ -78,19 +78,42 @@ function withTimeout(promise, ms) {
 }
 
 /**
+ * Checks and requests foreground location permissions if not already granted.
+ * Safe to call repeatedly; returns boolean granted status without throwing.
+ */
+export async function ensureLocationPermission() {
+  try {
+    const { status: existingStatus } = await Location.getForegroundPermissionsAsync();
+    if (existingStatus === 'granted') {
+      return true;
+    }
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    return status === 'granted';
+  } catch (e) {
+    console.warn('[LOCATION] Permission check error:', e.message);
+    return false;
+  }
+}
+
+/**
  * Current GPS position with high accuracy. If the GPS is slow to lock on, falls back to the
  * last position the phone knows about. Throws if neither is available.
  */
 export async function getCurrentCoordinates() {
   try {
+    const hasPermission = await ensureLocationPermission();
+    if (!hasPermission) {
+      throw new Error('Location permission denied');
+    }
+
     const position = await withTimeout(
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
       POSITION_TIMEOUT_MS
     );
     return { latitude: position.coords.latitude, longitude: position.coords.longitude };
   } catch (e) {
-    const last = await Location.getLastKnownPositionAsync();
-    if (last) {
+    const last = await Location.getLastKnownPositionAsync().catch(() => null);
+    if (last && last.coords) {
       return { latitude: last.coords.latitude, longitude: last.coords.longitude };
     }
     throw e;

@@ -1,21 +1,19 @@
 import { Platform, NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Used only if the address of the PC serving the app cannot be detected.
-// Set EXPO_PUBLIC_API_URL (e.g. http://192.168.1.20:5000/api/v1) to override everything.
-const FALLBACK_HOST = '10.110.153.199';
+// Set EXPO_PUBLIC_API_URL (e.g. http://<YOUR_LAN_IP>:5000/api/v1 or https://api.yourdomain.com/api/v1)
+// in mobile/.env to explicitly configure the backend target.
 
-// The app is loaded from http://<your PC>:8081, so the backend (port 5000) lives on that same PC.
-// Reading the address from there means this keeps working when the Wi-Fi address changes.
+// In development, Metro bundler serves the app from http://<your PC>:8081, so the backend (port 5000)
+// lives on that same host. Reading the address from there means local testing works across Wi-Fi networks.
 function detectHost() {
   if (Platform.OS === 'web') {
     return typeof window !== 'undefined' && window.location && window.location.hostname
       ? window.location.hostname
-      : 'localhost';
+      : null;
   }
 
-  // Where this app's JavaScript was downloaded from, e.g. http://192.168.1.20:8081/index.bundle?...
-  // Older React Native exposes it as SourceCode.scriptURL; the new architecture only through getConstants().
+  // Where this app's JavaScript bundle was loaded from, e.g. http://192.168.1.20:8081/index.bundle?...
   let scriptURL = null;
   try {
     const sourceCode = NativeModules && NativeModules.SourceCode;
@@ -29,10 +27,30 @@ function detectHost() {
   }
 
   const match = scriptURL && scriptURL.match(/^https?:\/\/([^/:]+)/);
-  return match ? match[1] : FALLBACK_HOST;
+  return match ? match[1] : null;
 }
 
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || `http://${detectHost()}:5000/api/v1`;
+function resolveApiBaseUrl() {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+  }
+
+  const detected = detectHost();
+  if (detected) {
+    return `http://${detected}:5000/api/v1`;
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn(
+      '[API Config Warning] EXPO_PUBLIC_API_URL is not configured and bundler host could not be detected. ' +
+      'Please set EXPO_PUBLIC_API_URL in mobile/.env (e.g. EXPO_PUBLIC_API_URL=http://<YOUR_COMPUTER_IP>:5000/api/v1).'
+    );
+  }
+
+  return '';
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 const REQUEST_TIMEOUT_MS = 6000;
 const OFFLINE_MEMORY_MS = 5000;
@@ -57,6 +75,12 @@ async function request(endpoint, options = {}) {
     throw new Error(OFFLINE_MESSAGE);
   }
 
+  if (!API_BASE_URL) {
+    throw new Error(
+      'API server URL is not configured. Please set EXPO_PUBLIC_API_URL in your mobile environment.'
+    );
+  }
+
   const url = `${API_BASE_URL}${endpoint}`;
   const { headers: extraHeaders, timeout, ...rest } = options;
 
@@ -67,13 +91,19 @@ async function request(endpoint, options = {}) {
     // no saved login - carry on as a guest
   }
 
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
+  };
+
+  // Only set application/json if body is not FormData (fetch handles boundary automatically for FormData)
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
+
   const config = {
     ...rest,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...extraHeaders,
-    },
+    headers,
   };
 
   try {
@@ -140,6 +170,131 @@ export const api = {
       timeout: 30000,
     }),
 
+  // 4. Photo Upload (Cloudinary via Backend)
+  uploadPhoto: async (photoInput) => {
+    if (!photoInput) return null;
+
+    if (!API_BASE_URL) {
+      throw new Error(
+        'API server URL is not configured. Please set EXPO_PUBLIC_API_URL in your mobile environment.'
+      );
+    }
+
+    // Support both raw string URI and ImagePickerAsset object
+    const uri = typeof photoInput === 'string' ? photoInput : photoInput.uri;
+    if (!uri) return null;
+
+    // If it's already an uploaded remote URL, return as-is
+    if (/^https?:\/\//i.test(uri)) {
+      return uri;
+    }
+
+    // Resolve filename & extension safely
+    let fileName = typeof photoInput === 'object' && photoInput.fileName ? photoInput.fileName : '';
+    let mimeType = typeof photoInput === 'object' && photoInput.mimeType ? photoInput.mimeType : '';
+
+    if (!fileName) {
+      const uriClean = uri.split('?')[0];
+      fileName = uriClean.split('/').pop() || '';
+    }
+
+    // Detect extension from filename or mimeType
+    let ext = 'jpg';
+    const extMatch = /\.(\w+)$/.exec(fileName);
+    if (extMatch) {
+      ext = extMatch[1].toLowerCase();
+      if (ext === 'jpeg') ext = 'jpg';
+    } else if (mimeType && mimeType.includes('/')) {
+      const mExt = mimeType.split('/')[1].toLowerCase();
+      if (['jpeg', 'jpg', 'png', 'webp', 'gif'].includes(mExt)) {
+        ext = mExt === 'jpeg' ? 'jpg' : mExt;
+      }
+    }
+
+    // Guarantee valid filename with extension (e.g. "rescue-1731835000000.jpg" or "photo.jpg")
+    const safeName = fileName && /\.\w+$/.test(fileName)
+      ? fileName
+      : `rescue-${Date.now()}.${ext}`;
+
+    const safeType = mimeType || `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+
+    const formData = new FormData();
+
+    if (Platform.OS === 'web') {
+      const res = await fetch(uri);
+      const blob = await res.blob();
+      formData.append('photo', blob, safeName);
+    } else {
+      formData.append('photo', {
+        uri,
+        name: safeName,
+        type: safeType,
+      });
+    }
+
+    // Use XMLHttpRequest for multipart upload to completely bypass Expo fetch convertFormDataAsync limitation
+    // (which throws "Unsupported FormDataPart implementation" on React Native objects)
+    return new Promise(async (resolve, reject) => {
+      let token = null;
+      try {
+        token = await AsyncStorage.getItem('user_token');
+      } catch (e) {
+        // Guest mode
+      }
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE_URL}/upload`);
+      xhr.timeout = 30000; // 30s timeout
+
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+      // Note: Never set Content-Type header manually on FormData XHR - boundary is calculated natively
+
+      xhr.onload = () => {
+        let data;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (e) {
+          data = null;
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (data && data.url) {
+            resolve(data.url);
+          } else {
+            reject(new Error('Upload succeeded but server did not return a valid photo URL.'));
+          }
+        } else {
+          const errMsg = (data && data.error) ? data.error : `Upload failed with HTTP ${xhr.status}`;
+          const httpError = new Error(errMsg);
+          httpError.status = xhr.status;
+          reject(httpError);
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(
+          new Error(
+            'Network failure: Cannot reach upload server. Make sure your phone is on the same Wi-Fi as your computer.'
+          )
+        );
+      };
+
+      xhr.ontimeout = () => {
+        reject(
+          new Error('Photo upload timed out (30s). The photo may be too large or the network connection is slow.')
+        );
+      };
+
+      try {
+        xhr.send(formData);
+      } catch (sendErr) {
+        reject(new Error(`Failed to transmit photo: ${sendErr.message}`));
+      }
+    });
+  },
+
   // 4. Cases
   getCaseById: (caseId) => request(`/cases/${caseId}`),
   getMyReports: () => request('/cases/my-reports'),
@@ -179,6 +334,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ latitude, longitude }),
     }),
+  registerDeviceToken: (token) =>
+    request('/rescuers/device-token', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
 
   // 7. Emergency Contacts
   getContacts: (category = '') =>
@@ -187,6 +347,67 @@ export const api = {
   // 8. Animals & QR
   getAnimalByCaseId: (caseId) => request(`/animals/case/${caseId}`),
   getAnimalByQr: (identifier) => request(`/animals/qr/${identifier}`),
+
+  // 9. Coordinator APIs
+  getCoordinatorStats: () => request('/coordinator/stats'),
+  getEscalatedCases: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/coordinator/cases${query ? `?${query}` : ''}`);
+  },
+  manualAssignRescuer: (caseId, rescuerId, note) =>
+    request(`/coordinator/cases/${caseId}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ rescuerId, note }),
+    }),
+  verifyRescuer: (rescuerId, verificationStatus) =>
+    request(`/coordinator/rescuers/${rescuerId}/verify`, {
+      method: 'PATCH',
+      body: JSON.stringify({ verificationStatus }),
+    }),
+  // Coordinator uses existing rescuers list (staff-only)
+  getRescuersList: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/rescuers${query ? `?${query}` : ''}`);
+  },
+  // Coordinator uses existing cases endpoint (role-scoped)
+  getActiveCases: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/cases${query ? `?${query}` : ''}`);
+  },
+
+  // 10. Adoption APIs
+  getAdoptions: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/adoptions${query ? `?${query}` : ''}`);
+  },
+  getAdoptionById: (id) => request(`/adoptions/${id}`),
+  createAdoption: (data) =>
+    request('/adoptions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAdoption: (id, data) =>
+    request(`/adoptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  submitAdoptionRequest: (id, requestData) =>
+    request(`/adoptions/${id}/requests`, {
+      method: 'POST',
+      body: JSON.stringify(requestData),
+    }),
+
+  // 11. Password Recovery
+  forgotPassword: (phone) =>
+    request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ phone }),
+    }),
+  resetPassword: (token, newPassword) =>
+    request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword }),
+    }),
 };
 
 export default api;
