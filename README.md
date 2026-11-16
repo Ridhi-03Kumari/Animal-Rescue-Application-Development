@@ -124,23 +124,30 @@ Supports rescuer approval and handles cases requiring manual intervention.
 | Technology | Purpose |
 |---|---|
 | React Native + Expo | Mobile application |
-| Node.js + Express | Backend |
-| MongoDB | Database |
-| Firebase Authentication | Authentication |
-| Firebase Cloud Messaging | Push notifications |
-| Google Maps Platform | Maps and location |
-| Socket.IO | Real time tracking |
-| Cloudinary | Image storage |
-| Gemini API | AI urgency triage |
+| Node.js + Express | Backend REST API & Realtime Server |
+| MongoDB / DevStore Fallback | Database with offline memory fallback |
+| JWT Authentication | Token-based authentication with bcrypt hashing |
+| Firebase Cloud Messaging | Push notifications for rescuers |
+| Google Maps Platform | Maps, geolocation and routing |
+| Socket.IO | Real-time live rescue tracking |
+| Cloudinary | Cloud image storage for animal photos |
+| Gemini API | AI urgency triage (with offline heuristic fallback) |
 
 ## Project Structure
 
 ```text
-animal-rescue-app/
-├── mobile/
-├── backend/
-├── .env.example
-├── .gitignore
+Animal-Rescue-Application-Development/
+├── animal-rescue-backend/       # Express.js REST API & Socket.IO server
+│   ├── src/                     # Controllers, models, routes, middleware, services
+│   ├── tests/                   # Automated backend test suites
+│   ├── .env.example             # Backend environment variable template
+│   └── package.json
+├── mobile/                      # React Native / Expo application
+│   ├── src/                     # Screens (Citizen, Rescuer, Coordinator), services, navigation
+│   ├── app.config.js            # Dynamic Expo config for Maps API key
+│   ├── .env.example             # Mobile environment variable template
+│   └── package.json
+├── .gitignore                   # Root repository ignore rules
 └── README.md
 ```
 
@@ -148,28 +155,49 @@ animal-rescue-app/
 
 ### Prerequisites
 
-- Node.js
+- Node.js (v18+)
 - npm
 - Git
-- Expo
-- MongoDB
-- Firebase project
-- Google Maps API access
-- Cloudinary account
-- Gemini API access
+- Expo CLI
+- MongoDB (optional; defaults to in-memory JSON dev store when offline)
+- Cloudinary account (required for production image uploads)
+- Firebase project (for push notifications)
+- Google Maps API key (optional; app falls back to GPS coordinate view)
+- Gemini API key (optional; app falls back to offline rule-based triage)
 
-### Backend
+### Backend Setup
 
 ```bash
-cd backend
+cd animal-rescue-backend
 npm install
 ```
 
-Create a `.env` file using `.env.example` and add the required credentials.
+Create `.env` using `.env.example` as a template:
 
-Start the backend using the script defined in `backend/package.json`.
+```bash
+cp .env.example .env
+```
 
-### Mobile
+Start the backend:
+
+```bash
+# Development (with nodemon)
+npm run dev
+
+# Or standard production start
+npm start
+```
+
+### Running Tests
+
+The backend includes a comprehensive test suite covering authentication, rate limiting, dispatch scoring, AI triage, QR codes, upload validation, devStore fallback, and end-to-end simulation:
+
+```bash
+cd animal-rescue-backend
+npm test
+```
+
+### Mobile Setup
 
 ```bash
 cd mobile
@@ -177,7 +205,50 @@ npm install
 npx expo start
 ```
 
-The application can be tested on an Android device using Expo Go during development.
+The application can be tested on an Android or iOS device using Expo Go, in an emulator, or in a web browser during development.
+
+### Google Maps Platform Setup (Phase 7)
+
+1. **Google Cloud Console**: Enable **Maps SDK for Android** and **Maps SDK for iOS**.
+2. **API Key Restrictions**: Restrict the mobile key by Application Identity (Android Package Name `com.animalrescue.bengaluru` and SHA-1 certificate fingerprint) and API restrictions (Maps SDK only).
+3. **Configuration**: Add `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<your_key>` in `mobile/.env`.
+4. **Build Requirements**: Native Google Maps rendering on physical devices requires an Expo Development Build (`npx expo run:android` / `npx expo run:ios` or EAS Build). In Expo Go or Web environments without native Google Maps binaries, the app automatically runs in a resilient fallback mode displaying satellite coordinates, distances, and external navigation links without crashing.
+
+### Coordinator / Admin Mobile Experience (Phase 8)
+
+The application includes an integrated Coordinator & Admin role experience inside the single mobile client:
+
+1. **Role-Based Navigation**: Authenticated users with role `coordinator` or `admin` are automatically routed to the coordinator workspace (`CoordinatorHome`, `EscalatedCases`, `ActiveCases`, `CoordinatorCaseDetail`, `RescuerSelection`, `CoordinatorRescuers`, `CoordinatorProfile`).
+2. **Operational Dashboard**: Realtime system overview displaying total cases, cases needing intervention, ongoing active rescues, completed count, available field rescuers, and quick-action navigation.
+3. **Escalated Cases Management**: Infinite-scrolling paginated list of cases escalated after maximum failed auto-dispatch attempts or response timeouts, sorted deterministically by urgency.
+4. **Manual Rescuer Assignment**: Emergency coordinator can inspect nearby qualified rescuers, check availability status and animal capabilities, and dispatch a specific responder directly via `POST /api/v1/coordinator/cases/:id/assign` with realtime socket alert and push notification dispatch.
+5. **Active Rescues & Live Map**: Complete visibility into ongoing rescue missions, rendering case locations and responder movement in realtime via the shared `RescueMapView` and Socket.IO connection.
+6. **Robust RBAC Security**: Server-enforced role authentication guards all coordinator endpoints against unauthorized citizen and rescuer access with HTTP 403.
+
+### Adoption Module & Validation Hardening (Phase 9)
+
+Phase 9 completes the final core functional gaps identified in the PRD audit:
+
+1. **Backend-Backed Adoption System**:
+   - `Adoption` model supporting sheltered and recovered animal listings with status (`available`, `pending`, `adopted`), species, breed, age, gender, size, medical summary, photos, and temperament.
+   - REST endpoints (`/api/v1/adoptions`): public paginated listing with species filter, listing detail, staff creation (`POST`), staff modification (`PATCH`), and admin removal (`DELETE`).
+   - Adoption application submission (`POST /api/v1/adoptions/:id/requests`) with validation, duplicate checks, and prohibition of requests on already-adopted animals.
+   - Connected `AdoptionScreen.js` to live backend APIs with pull-to-refresh, species category filters, loading indicators, and error recovery.
+2. **Backend Validation Audit**:
+   - Malformed ObjectId protection across case, animal, and adoption lookup endpoints.
+   - Strict lifecycle transition validation: completed and cancelled cases are permanently shielded from accidental or unauthorized transition back into active rescue states.
+   - Comprehensive query pagination clamping and bounds checks.
+3. **Secure Account Recovery Flow**:
+   - Endpoints: `POST /api/v1/auth/forgot-password` and `POST /api/v1/auth/reset-password`.
+   - Security features: Cryptographically secure 64-hex tokens (SHA-256 hashed at rest), 15-minute expiration, single-use invalidation, rate limiting (`authLimiter`), and generic enumeration-resistant response messaging.
+   - External SMS/email gateway delivery remains an external infrastructure prerequisite (in development/test environments, secure verification tokens are returned in the response payload).
+
+### Known Limitations & Deployment Notes
+
+- **Password Recovery Delivery**: The backend implements secure 15-minute, single-use, SHA-256 hashed password reset tokens. In development and test environments, the token is returned in the API response. Production deployment requires wiring an external SMS or WhatsApp gateway (e.g. Twilio, MSG91) to dispatch reset tokens to citizens' mobile numbers.
+- **Render Free Tier Hosting**: Web services on Render's free tier sleep after 15 minutes of inactivity and incur a ~30 second cold start on first request.
+- **Persistent Storage**: Render instances have an ephemeral file system. Production deployments must configure Cloudinary credentials for permanent photo storage.
+- **Google Maps Key**: Native map rendering requires a Google Cloud API key restricted to the package name `com.animalrescue.bengaluru`. Without a key, the app gracefully falls back to displaying numerical coordinates, distance calculations, and external navigation links.
 
 ## Environment Variables
 
