@@ -125,6 +125,7 @@ async function request(endpoint, options = {}) {
       }
       const httpError = new Error(data.error || `HTTP error ${response.status}`);
       httpError.status = response.status; // lets screens react to e.g. 401 "please log in"
+      httpError.code = data.code; // e.g. INVALID_IMAGE, so a screen can tell "not an animal photo" from other errors
       throw httpError;
     }
     return data;
@@ -244,7 +245,9 @@ export const api = {
 
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE_URL}/upload`);
-      xhr.timeout = 30000; // 30s timeout
+      // The server checks the photo with AI before storing it (usually 2-4 s, up to ~17 s when the AI service
+      // is slow and has to be retried), then stores it. Leave plenty of room so a good photo is not cut off.
+      xhr.timeout = 45000;
 
       if (token) {
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
@@ -269,6 +272,10 @@ export const api = {
           const errMsg = (data && data.error) ? data.error : `Upload failed with HTTP ${xhr.status}`;
           const httpError = new Error(errMsg);
           httpError.status = xhr.status;
+          // INVALID_IMAGE = the AI says it is not a photo of a real animal; IMAGE_CHECK_UNAVAILABLE = it could
+          // not be checked right now. `reason` is the AI's one-line explanation for a rejected photo.
+          httpError.code = data && data.code;
+          httpError.reason = data && typeof data.reason === 'string' ? data.reason : '';
           reject(httpError);
         }
       };
@@ -283,7 +290,7 @@ export const api = {
 
       xhr.ontimeout = () => {
         reject(
-          new Error('Photo upload timed out (30s). The photo may be too large or the network connection is slow.')
+          new Error('Checking the photo took too long. The network connection may be slow. Please try again.')
         );
       };
 

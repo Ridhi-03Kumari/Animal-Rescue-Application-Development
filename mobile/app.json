@@ -21,7 +21,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow the app to use your camera to photograph the animal.",
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }

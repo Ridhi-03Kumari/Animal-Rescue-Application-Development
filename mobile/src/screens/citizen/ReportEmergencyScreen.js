@@ -8,7 +8,6 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -41,15 +40,63 @@ const ANIMAL_TYPES = [
 
 export default function ReportEmergencyScreen({ navigation }) {
   const { user } = useSession();
+  // photo = the picture on this phone (shown on screen); photoUrl = the same picture on the server, once it has
+  // passed the animal-photo check. Only photoUrl is ever sent with the report.
   const [photo, setPhoto] = useState(null);
   const [photoAsset, setPhotoAsset] = useState(null);
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const [checkingPhoto, setCheckingPhoto] = useState(false);
+  // { kind: 'invalid' | 'unavailable', message } when the last photo was refused or could not be checked
+  const [photoProblem, setPhotoProblem] = useState(null);
+  // Chosen only when the photo check keeps failing (no connection, AI service down): report without a photo
+  const [skipPhoto, setSkipPhoto] = useState(false);
   const [animalType, setAnimalType] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState(null);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
 
+  const clearPhoto = () => {
+    setPhoto(null);
+    setPhotoAsset(null);
+    setPhotoUrl(null);
+  };
+
+  // Every photo (camera or gallery) is sent to the server straight away. The server checks, with AI, that it is
+  // a real photo of an animal and only then stores it. Pictures of anything else are refused, and a photo that
+  // could not be checked is never attached to the report.
+  const attachPhoto = async (asset) => {
+    setPhoto(asset.uri);
+    setPhotoAsset(asset);
+    setPhotoUrl(null);
+    setPhotoProblem(null);
+    setSkipPhoto(false);
+    setCheckingPhoto(true);
+
+    try {
+      const url = await api.uploadPhoto(asset);
+      setPhotoUrl(url);
+    } catch (err) {
+      if (err.code === 'INVALID_IMAGE') {
+        clearPhoto(); // a refused picture is never kept or shown as attached
+        const why = err.reason ? `${err.reason.trim().slice(0, 200)} ` : '';
+        const message = `${why}Please take a new photo of the animal yourself, using the camera.`;
+        setPhotoProblem({ kind: 'invalid', message });
+        notify('Invalid image', `We can't use this picture. ${message}`);
+      } else {
+        // Could not be checked right now. The photo stays on screen but is not attached.
+        setPhotoProblem({
+          kind: 'unavailable',
+          message: err.message || 'We could not check the photo right now. Please try again in a moment.',
+        });
+      }
+    } finally {
+      setCheckingPhoto(false);
+    }
+  };
+
   const takePhotoWithCamera = async () => {
+    if (checkingPhoto) return;
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
 
@@ -64,13 +111,11 @@ export default function ReportEmergencyScreen({ navigation }) {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.6, // plenty to recognise an animal, and quicker to send and check
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setPhoto(asset.uri);
-        setPhotoAsset(asset);
+        await attachPhoto(result.assets[0]);
       }
     } catch (err) {
       console.log('Camera error:', err.message);
@@ -82,6 +127,7 @@ export default function ReportEmergencyScreen({ navigation }) {
   };
 
   const choosePhotoFromGallery = async () => {
+    if (checkingPhoto) return;
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
@@ -96,13 +142,11 @@ export default function ReportEmergencyScreen({ navigation }) {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.6, // plenty to recognise an animal, and quicker to send and check
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setPhoto(asset.uri);
-        setPhotoAsset(asset);
+        await attachPhoto(result.assets[0]);
       }
     } catch (err) {
       console.log('Gallery error:', err.message);
@@ -208,7 +252,14 @@ export default function ReportEmergencyScreen({ navigation }) {
       // Do NOT pretend the report was sent: in an emergency the person must know it did not go through.
       // The key is kept, so tapping Submit again is safe even if the first try actually arrived.
       console.log('Report not sent:', apiErr.message);
-      notify('Report not sent', `${apiErr.message}\n\nPlease check your connection and tap Submit again.`);
+      if (apiErr.code === 'INVALID_IMAGE') {
+        // The server does not accept this photo (for example it was removed): take it again
+        clearPhoto();
+        setPhotoProblem({ kind: 'invalid', message: 'Please take or choose a clear photo of the animal and send the report again.' });
+        notify('Invalid image', 'The photo could not be used. Please add a new photo of the animal and send the report again.');
+      } else {
+        notify('Report not sent', `${apiErr.message}\n\nPlease check your connection and tap Submit again.`);
+      }
     } finally {
       sendingRef.current = false;
       setSubmitting(false);
@@ -218,8 +269,20 @@ export default function ReportEmergencyScreen({ navigation }) {
   const submitReport = async () => {
     if (sendingRef.current) return;
 
-    if (!photo) {
-      notify('Missing photo', 'Please add a photo of the animal.');
+    if (checkingPhoto) {
+      notify('Please wait', 'We are still checking your photo.');
+      return;
+    }
+
+    // The report needs a photo that passed the animal-photo check, unless the check could not run and the
+    // person chose to report without a photo (so an emergency is never blocked by a service outage)
+    if (!photoUrl && !skipPhoto) {
+      notify(
+        'Missing photo',
+        photoProblem && photoProblem.kind === 'unavailable'
+          ? 'Your photo has not been checked yet. Tap "Try again", or choose to send the report without a photo.'
+          : 'Please add a photo of the animal.'
+      );
       return;
     }
 
@@ -233,58 +296,8 @@ export default function ReportEmergencyScreen({ navigation }) {
       return;
     }
 
-    sendingRef.current = true;
-    setSubmitting(true);
-
-    let uploadedPhotoUrl = null;
-
-    // Upload local image to backend/Cloudinary before submitting report
-    if (photo && (photo.startsWith('file://') || photo.startsWith('blob:') || photo.startsWith('content://') || photo.startsWith('ph://'))) {
-      try {
-        uploadedPhotoUrl = await api.uploadPhoto(photoAsset || photo);
-      } catch (uploadErr) {
-        console.log('Photo upload failed:', uploadErr.message);
-        sendingRef.current = false;
-        setSubmitting(false);
-
-        const promptTitle = 'Photo Upload Failed';
-        const promptMsg = `${uploadErr.message || 'Could not upload the animal photo.'}\n\nWould you like to retry or continue without the photo so responders are alerted immediately?`;
-
-        if (Platform.OS === 'web') {
-          const retry = typeof window !== 'undefined'
-            ? window.confirm(`${promptTitle}\n\n${promptMsg}\n\nClick OK to retry upload, or Cancel to continue without photo.`)
-            : false;
-          if (retry) {
-            submitReport();
-          } else {
-            proceedWithReportSubmission(null);
-          }
-        } else {
-          Alert.alert(
-            promptTitle,
-            promptMsg,
-            [
-              {
-                text: 'Retry Upload',
-                onPress: () => submitReport(),
-              },
-              {
-                text: 'Continue Without Photo',
-                style: 'destructive',
-                onPress: () => proceedWithReportSubmission(null),
-              },
-            ],
-            { cancelable: false }
-          );
-        }
-        return;
-      }
-    } else {
-      // Already an HTTPS URL
-      uploadedPhotoUrl = photo;
-    }
-
-    await proceedWithReportSubmission(uploadedPhotoUrl);
+    // photoUrl is only set after the server accepted the photo; it is null when sending without a photo
+    await proceedWithReportSubmission(photoUrl || null);
   };
 
   return (
@@ -316,10 +329,16 @@ export default function ReportEmergencyScreen({ navigation }) {
           <View style={styles.previewCard}>
             <Image source={{ uri: photo }} style={styles.previewImage} resizeMode="cover" />
 
-            {/* Top Right Status Badge */}
-            <View style={styles.previewBadge}>
-              <Text style={styles.previewBadgeText}>✓ Photo Attached</Text>
-            </View>
+            {/* Top Right Status Badge: only a photo that passed the animal check counts as attached */}
+            {photoUrl ? (
+              <View style={styles.previewBadge}>
+                <Text style={styles.previewBadgeText}>✓ Animal photo verified</Text>
+              </View>
+            ) : !checkingPhoto ? (
+              <View style={[styles.previewBadge, styles.previewBadgeWarn]}>
+                <Text style={styles.previewBadgeText}>Not checked</Text>
+              </View>
+            ) : null}
 
             {/* Bottom Floating Actions Bar */}
             <View style={styles.previewActionsBar}>
@@ -344,8 +363,9 @@ export default function ReportEmergencyScreen({ navigation }) {
               <TouchableOpacity
                 style={[styles.previewActionBtn, styles.removeBtn]}
                 onPress={() => {
-                  setPhoto(null);
-                  setPhotoAsset(null);
+                  if (checkingPhoto) return;
+                  clearPhoto();
+                  setPhotoProblem(null);
                 }}
                 activeOpacity={0.85}
               >
@@ -353,6 +373,14 @@ export default function ReportEmergencyScreen({ navigation }) {
                 <Text style={[styles.previewActionText, { color: colors.red }]}>Remove</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Shown while the server checks that this really is a photo of an animal */}
+            {checkingPhoto ? (
+              <View style={styles.photoChecking}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+                <Text maxFontSizeMultiplier={1.3} style={styles.photoCheckingText}>Checking photo...</Text>
+              </View>
+            ) : null}
           </View>
         ) : (
           /* Dual Direct-Action Cards (Interactive, Clean, Zero-Fluff) */
@@ -392,6 +420,49 @@ export default function ReportEmergencyScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Why the last photo was refused, or that it could not be checked */}
+        {photoProblem ? (
+          <View style={photoProblem.kind === 'invalid' ? styles.photoErrorBox : styles.photoWarnBox}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.photoProblemTitle}>
+              {photoProblem.kind === 'invalid' ? "This picture can't be sent" : 'Photo not checked yet'}
+            </Text>
+            <Text maxFontSizeMultiplier={1.3} style={styles.photoProblemText}>{photoProblem.message}</Text>
+
+            {photoProblem.kind === 'unavailable' ? (
+              <View style={styles.photoProblemActions}>
+                <AppButton
+                  title="Try again"
+                  size="sm"
+                  style={styles.photoProblemBtn}
+                  onPress={() => photoAsset && attachPhoto(photoAsset)}
+                />
+                <AppButton
+                  title="Send without photo"
+                  size="sm"
+                  variant="outline"
+                  style={styles.photoProblemBtn}
+                  onPress={() => {
+                    clearPhoto();
+                    setPhotoProblem(null);
+                    setSkipPhoto(true);
+                  }}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : skipPhoto && !photo ? (
+          <View style={styles.photoWarnBox}>
+            <Text maxFontSizeMultiplier={1.3} style={styles.photoProblemText}>
+              This report will be sent without a photo. You can still add one above.
+            </Text>
+          </View>
+        ) : !photo ? (
+          <Text maxFontSizeMultiplier={1.3} style={styles.photoHint}>
+            Take a clear photo of the animal yourself. Every photo is checked, and pictures that are not an original
+            photo of a real animal (AI images, pictures from the internet, screenshots) cannot be sent.
+          </Text>
+        ) : null}
 
         <Text maxFontSizeMultiplier={1.3} style={styles.label}>Animal Type</Text>
 
@@ -462,7 +533,7 @@ export default function ReportEmergencyScreen({ navigation }) {
             title={submitting ? 'Sending report...' : 'Submit Emergency Report'}
             onPress={submitReport}
             loading={submitting}
-            disabled={submitting}
+            disabled={submitting || checkingPhoto}
           />
         </View>
     </ScreenBackground>
@@ -604,6 +675,63 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: rs(12),
     fontWeight: '700',
+  },
+  previewBadgeWarn: {
+    backgroundColor: 'rgba(184, 134, 42, 0.95)',
+  },
+  photoChecking: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(8, 44, 39, 0.62)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoCheckingText: {
+    color: '#FFFFFF',
+    fontSize: rs(16),
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  photoHint: {
+    fontSize: rs(13),
+    lineHeight: rs(18),
+    color: colors.muted,
+    marginBottom: 14,
+  },
+  photoErrorBox: {
+    backgroundColor: '#FFE3E0',
+    borderLeftWidth: 4,
+    borderLeftColor: '#B3261E',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
+  },
+  photoWarnBox: {
+    backgroundColor: colors.orangeSoft,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.orange,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
+  },
+  photoProblemTitle: {
+    fontFamily: fonts.serif,
+    fontSize: rs(15),
+    fontWeight: '700',
+    color: colors.ink,
+    marginBottom: 4,
+  },
+  photoProblemText: {
+    fontSize: rs(14),
+    lineHeight: rs(20),
+    color: colors.ink,
+  },
+  photoProblemActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  photoProblemBtn: {
+    flex: 1,
   },
   previewActionsBar: {
     position: 'absolute',
