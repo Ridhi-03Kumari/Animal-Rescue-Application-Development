@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,17 @@ export default function AuthScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Coming back from "Forgot password?" after a successful reset: show sign-in with the phone filled in
+  const resetAt = route.params?.resetAt;
+  useEffect(() => {
+    if (!route.params?.resetDone) return;
+    setIsLogin(true);
+    setErrorMsg('');
+    setPassword('');
+    if (route.params.phone) setPhone(route.params.phone);
+    setSuccessMsg('Password reset successfully. Please sign in with your new password.');
+  }, [resetAt]);
 
   const toggleAnimal = (id) => {
     if (selectedAnimals.includes(id)) {
@@ -257,6 +268,15 @@ export default function AuthScreen({ navigation, route }) {
             value={password}
             onChangeText={setPassword}
           />
+          {isLogin ? (
+            <TouchableOpacity
+              style={styles.forgotBtn}
+              onPress={() => navigation.navigate('ForgotPassword', { phone })}
+              accessibilityRole="button"
+            >
+              <Text maxFontSizeMultiplier={1.3} style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Additional Rescuer-Specific Capabilities (Shown on Sign Up) */}
@@ -470,6 +490,18 @@ const styles = StyleSheet.create({
     fontSize: rs(16),
     color: colors.ink,
     backgroundColor: colors.cream,
+  },
+  forgotBtn: {
+    alignSelf: 'flex-end',
+    minHeight: 44,
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  forgotText: {
+    fontSize: rs(14),
+    fontWeight: '700',
+    color: colors.forest,
+    textDecorationLine: 'underline',
   },
   rescuerSpecs: {
     marginTop: 6,

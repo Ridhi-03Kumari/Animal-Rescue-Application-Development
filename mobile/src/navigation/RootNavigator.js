@@ -11,6 +11,7 @@ export const navigationRef = createNavigationContainerRef();
 // Shared
 import WelcomeScreen from '../screens/shared/WelcomeScreen';
 import AuthScreen from '../screens/shared/AuthScreen';
+import ForgotPasswordScreen from '../screens/shared/ForgotPasswordScreen';
 
 // Citizen Screens
 import CitizenHomeScreen from '../screens/citizen/CitizenHomeScreen';
@@ -103,6 +104,7 @@ export default function RootNavigator() {
           [
             <Stack.Screen key="Welcome" name="Welcome" component={WelcomeScreen} />,
             <Stack.Screen key="Auth" name="Auth" component={AuthScreen} />,
+            <Stack.Screen key="ForgotPassword" name="ForgotPassword" component={ForgotPasswordScreen} />,
             ...citizenScreens,
           ]
         ) : user.role === 'rescuer' ? (
