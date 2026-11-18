@@ -5,10 +5,18 @@ const fs = require('fs');
 const multer = require('multer');
 const upload = require('../middleware/upload');
 const { optionalProtect } = require('../middleware/auth');
+const { uploadLimiter } = require('../middleware/rateLimiter');
 const { isConfigured, uploadToCloudinary } = require('../config/cloudinary');
+// Used as imageValidation.validateAnimalPhoto(...) (not destructured) so tests can replace it
+const imageValidation = require('../services/imageValidationService');
+
+const INVALID_IMAGE_MESSAGE =
+  'Invalid image. Only an original photo of a real animal, taken on the spot, can be sent. Pictures without an animal, AI-generated images and pictures from the internet are not accepted.';
 
 // POST /api/v1/upload (Single photo upload)
-router.post('/', optionalProtect, (req, res, next) => {
+// A photo is only stored (Cloudinary, or local disk in development) after it passes the animal-photo check.
+// Anything else is refused before it is saved anywhere, so every stored report photo is a checked one.
+router.post('/', uploadLimiter, optionalProtect, (req, res, next) => {
   upload.single('photo')(req, res, async (err) => {
     if (err) {
       if (err instanceof multer.MulterError) {
@@ -19,13 +27,32 @@ router.post('/', optionalProtect, (req, res, next) => {
         }
         return res.status(400).json({ error: `Upload error: ${err.message}` });
       }
-      return res.status(400).json({ error: err.message });
+      // The file-type filter in middleware/upload.js rejects anything that is not an image
+      return res.status(400).json({ error: err.message, code: 'INVALID_IMAGE' });
     }
 
     try {
       if (!req.file) {
         return res.status(400).json({
           error: 'Missing file: Please provide an image file under the field "photo".',
+        });
+      }
+
+      // 0. Animal-photo check (AI). Must pass before the photo is stored anywhere.
+      const check = await imageValidation.validateAnimalPhoto({
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+      });
+
+      if (check.status === 'invalid') {
+        return res.status(422).json({ error: INVALID_IMAGE_MESSAGE, code: 'INVALID_IMAGE', reason: check.reason });
+      }
+
+      if (check.status !== 'valid') {
+        // The check could not run (no key, timeout, service error). Never let an unchecked photo through.
+        return res.status(503).json({
+          error: 'We could not check the photo right now. Please try again in a moment.',
+          code: 'IMAGE_CHECK_UNAVAILABLE',
         });
       }
 

@@ -24,6 +24,18 @@ const reportLimiter = rateLimit({
   },
 });
 
+// Every photo upload is checked by Google Gemini (see services/imageValidationService.js), so protect that
+// quota: a person needs about one upload per report, plus a few retakes.
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // 30 photo uploads per 15 minutes per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Too many photos sent from this device. Please wait a few minutes before sending another photo.',
+  },
+});
+
 // Protect AI triage endpoint against quota exhaustion and scraping
 const triageLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -38,6 +50,7 @@ const triageLimiter = rateLimit({
 module.exports = {
   authLimiter,
   reportLimiter,
+  uploadLimiter,
   triageLimiter,
 };
 

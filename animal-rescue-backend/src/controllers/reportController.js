@@ -4,6 +4,7 @@ const { assessUrgency } = require('../services/aiTriageService');
 const { emitCaseEvent } = require('../socket');
 const { calculateDistance } = require('../utils/distance');
 const { isDbConnected, saveCase, getAllCases, findCaseByClientRequestId } = require('../utils/devStore');
+const { isCheckedPhotoUrl } = require('../utils/checkedPhoto');
 
 // A report that arrives without a form key (an older app build still open on a phone) cannot be matched by
 // key, so it counts as a repeat when the same person sent the same animal, text and place within this window.
@@ -109,6 +110,15 @@ exports.createReport = async (req, res, next) => {
     if (!animalType || latitude === undefined || longitude === undefined) {
       return res.status(400).json({
         error: 'animalType, latitude, and longitude are required to submit an emergency report',
+      });
+    }
+
+    // A report may only carry a photo that went through the animal-photo check (see routes/upload.js). This stops
+    // someone from skipping the app and attaching any picture or link directly.
+    if (photoUrl && !isCheckedPhotoUrl(photoUrl, { host: req.get ? req.get('host') : undefined })) {
+      return res.status(400).json({
+        error: 'Invalid image. Please add a photo of the animal with the app and try again.',
+        code: 'INVALID_IMAGE',
       });
     }
 

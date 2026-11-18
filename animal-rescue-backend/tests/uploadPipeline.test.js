@@ -81,7 +81,11 @@ async function runUploadPipelineTests() {
   console.log('✅ Test 7 Passed: Multer fileSize limit preserved at 10 MB and single file');
 
   // Test 8: End-to-end report creation with uploaded photo URL
-  const mockPhotoUrl = 'https://res.cloudinary.com/animal-rescue/image/upload/v123456/rescue-test.jpg';
+  // A report only accepts photo addresses that the upload route produced (after the animal-photo check), so this
+  // is the exact shape of a Cloudinary address from routes/upload.js + config/cloudinary.js.
+  process.env.CLOUDINARY_CLOUD_NAME = 'animal-rescue';
+  const mockPhotoUrl =
+    'https://res.cloudinary.com/animal-rescue/image/upload/v123456/animal_rescue/reports/rescue-1731835000000-482913.jpg';
   const mockReq = {
     body: {
       animalType: 'dog',
@@ -119,7 +123,38 @@ async function runUploadPipelineTests() {
   assert.strictEqual(responseData.case.photoUrl, mockPhotoUrl, 'Report case must store the photoUrl');
   console.log('✅ Test 8 Passed: Emergency report creation successfully stores uploaded photo URL');
 
-  console.log('\n🎉 ALL 8 UPLOAD PIPELINE AND ANDROID PHOTO VALIDATION TESTS PASSED WITH 100% SUCCESS!\n');
+  // Test 9: A photo address that did not come from the checked upload route is refused
+  for (const badUrl of [
+    'https://example.com/dog.jpg',
+    'https://res.cloudinary.com/some-other-account/image/upload/v1/animal_rescue/reports/rescue-1-2.jpg',
+    'https://res.cloudinary.com/animal-rescue/image/upload/v1/other-folder/selfie.jpg',
+    'file:///data/user/0/cache/ImagePicker/gallery.jpg',
+  ]) {
+    let badStatus = null;
+    let badBody = null;
+    const badRes = {
+      status: (code) => {
+        badStatus = code;
+        return badRes;
+      },
+      json: (data) => {
+        badBody = data;
+        return badRes;
+      },
+    };
+    await reportController.createReport(
+      { body: { ...mockReq.body, photoUrl: badUrl, clientRequestId: `bad-photo-${Date.now()}-${Math.random()}` }, user: null },
+      badRes,
+      (err) => {
+        if (err) throw err;
+      }
+    );
+    assert.strictEqual(badStatus, 400, `A report with ${badUrl} must be refused`);
+    assert.strictEqual(badBody.code, 'INVALID_IMAGE');
+  }
+  console.log('✅ Test 9 Passed: Reports with an unchecked photo address are refused');
+
+  console.log('\n🎉 ALL 9 UPLOAD PIPELINE AND ANDROID PHOTO VALIDATION TESTS PASSED WITH 100% SUCCESS!\n');
 }
 
 runUploadPipelineTests().catch((err) => {

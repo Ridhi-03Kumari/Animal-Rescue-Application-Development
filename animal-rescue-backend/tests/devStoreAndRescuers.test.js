@@ -273,17 +273,77 @@ async function run() {
     assert.strictEqual(badStatus.status, 400);
     console.log('✔ animal list and partial updates work');
 
-    const form = new FormData();
-    form.append('photo', new Blob([Buffer.from('fake-image-bytes')], { type: 'image/png' }), 'test.png');
-    const up = await fetch(`${base}/upload`, { method: 'POST', body: form });
+    // The animal-photo check calls Google Gemini, so the tests replace it with a fixed answer
+    const imageValidation = require('../src/services/imageValidationService');
+    let checkerAnswer = { status: 'valid' };
+    imageValidation.validateAnimalPhoto = async () => checkerAnswer;
+
+    const photoForm = (type = 'image/png', name = 'test.png') => {
+      const form = new FormData();
+      form.append('photo', new Blob([Buffer.from('fake-image-bytes')], { type }), name);
+      return form;
+    };
+    const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
+    const countUploads = () => (fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir).length : 0);
+    const filesBefore = countUploads();
+
+    const up = await fetch(`${base}/upload`, { method: 'POST', body: photoForm() });
     const upJson = await up.json();
-    assert.strictEqual(up.status, 201, 'photo upload works');
+    assert.strictEqual(up.status, 201, 'a photo that passes the check is accepted');
     uploadedFile = upJson.filename;
     const served = await fetch(upJson.url);
     assert.strictEqual(served.status, 200, 'uploaded photo is served back');
     const noFile = await fetch(`${base}/upload`, { method: 'POST', body: new FormData() });
     assert.strictEqual(noFile.status, 400);
-    console.log('✔ photo upload stores and serves the file');
+    console.log('✔ photo upload stores and serves a checked photo');
+
+    // A photo that is not an animal is refused with "Invalid image" and is never stored
+    checkerAnswer = { status: 'invalid', reason: 'This is a selfie.' };
+    const rejected = await fetch(`${base}/upload`, { method: 'POST', body: photoForm() });
+    const rejectedJson = await rejected.json();
+    assert.strictEqual(rejected.status, 422, 'a photo that is not an animal is rejected');
+    assert.strictEqual(rejectedJson.code, 'INVALID_IMAGE');
+    assert.ok(/invalid image/i.test(rejectedJson.error), 'the message says the image is invalid');
+    assert.strictEqual(rejectedJson.reason, 'This is a selfie.', 'the reason is passed on to the app');
+
+    // If the check cannot run, the photo is NOT let through
+    checkerAnswer = { status: 'unavailable', reason: 'timeout' };
+    const unchecked = await fetch(`${base}/upload`, { method: 'POST', body: photoForm() });
+    const uncheckedJson = await unchecked.json();
+    assert.strictEqual(unchecked.status, 503, 'an unchecked photo is not accepted');
+    assert.strictEqual(uncheckedJson.code, 'IMAGE_CHECK_UNAVAILABLE');
+
+    // A file that is not an image at all never reaches the check
+    checkerAnswer = { status: 'valid' };
+    const notImage = await fetch(`${base}/upload`, { method: 'POST', body: photoForm('application/pdf', 'doc.pdf') });
+    assert.strictEqual(notImage.status, 400, 'a non-image file is rejected');
+    assert.strictEqual((await notImage.json()).code, 'INVALID_IMAGE');
+
+    assert.strictEqual(countUploads(), filesBefore + 1, 'rejected and unchecked photos are never stored; only the accepted one is');
+    console.log('✔ non-animal, unchecked and non-image uploads are rejected and not stored');
+
+    // A report can only carry a photo that passed the check
+    const reportBase = { animalType: 'dog', latitude: 12.93, longitude: 77.61, reporterPhone: '9000000099' };
+    const withChecked = await call('POST', '/reports', {
+      ...reportBase, photoUrl: upJson.url, clientRequestId: 'photo-ok-1',
+    });
+    assert.strictEqual(withChecked.status, 201, 'a report with a checked photo is accepted');
+    assert.strictEqual(withChecked.json.case.photoUrl, upJson.url);
+    const withoutPhoto = await call('POST', '/reports', { ...reportBase, clientRequestId: 'photo-none-1' });
+    assert.strictEqual(withoutPhoto.status, 201, 'a report with no photo is still accepted (emergency, nothing to attach)');
+    for (const [label, bad] of [
+      ['a file path on the phone', 'file:///data/user/0/cache/ImagePicker/gallery.jpg'],
+      ['a link to another website', 'https://example.com/uploads/animal-1-2.jpg'],
+      ['another website using the real file name', upJson.url.replace(/^http:\/\/[^/]+/, 'https://example.com')],
+      ['an upload that does not exist', upJson.url.replace(upJson.filename, 'animal-1-2.jpg')],
+      ['a path trick', `${base.replace('/api/v1', '')}/uploads/../../package.json`],
+      ['a fake Cloudinary link', 'https://res.cloudinary.com/someone/image/upload/v1/animal_rescue/reports/rescue-1-2.jpg'],
+    ]) {
+      const res = await call('POST', '/reports', { ...reportBase, photoUrl: bad, clientRequestId: `photo-bad-${label}` });
+      assert.strictEqual(res.status, 400, `${label} is rejected`);
+      assert.strictEqual(res.json.code, 'INVALID_IMAGE');
+    }
+    console.log('✔ reports only accept photos that passed the animal-photo check');
 
     // --- clean errors
     const unknown = await call('GET', '/nothing-here');
