@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,14 +25,18 @@ import { rs } from '../../responsive';
 const PHOTOS = {
   dog: require('../../../assets/pet_dog.jpg'),
   kitten: require('../../../assets/pet_kitten.jpg'),
+  cat: require('../../../assets/pet_kitten.jpg'),
 };
 
+// `id` is the species value stored on each adoption listing; `plural` is used in sentences
 const FILTERS = [
-  { id: 'all', label: 'All' },
-  { id: 'dog', label: 'Dogs' },
-  { id: 'cat', label: 'Cats' },
-  { id: 'bird', label: 'Birds' },
+  { id: 'all', label: 'All', plural: 'pets' },
+  { id: 'dog', label: 'Dogs', plural: 'dogs' },
+  { id: 'cat', label: 'Cats', plural: 'cats' },
+  { id: 'bird', label: 'Birds', plural: 'birds' },
 ];
+
+const speciesOf = (pet) => String(pet.species || pet.type || '').toLowerCase().trim();
 
 const EMPTY_FORM = { name: '', phone: '', area: '', reason: '' };
 
@@ -49,7 +53,12 @@ export default function AdoptionScreen({ navigation }) {
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchAdoptions = useCallback(async (activeFilter = filter) => {
+  // Every request gets a number; only the newest one is allowed to update the screen. Without this, a
+  // slow reply for an earlier tab could arrive last and put the wrong animals under the selected tab.
+  const latestRequest = useRef(0);
+
+  const loadPets = useCallback(async (activeFilter) => {
+    const requestId = ++latestRequest.current;
     try {
       setLoadError('');
       const params = { status: 'available' };
@@ -57,25 +66,34 @@ export default function AdoptionScreen({ navigation }) {
         params.species = activeFilter;
       }
       const res = await api.getAdoptions(params);
+      if (requestId !== latestRequest.current) return;
       setPets(res.items || res.adoptions || []);
     } catch (err) {
+      if (requestId !== latestRequest.current) return;
       setLoadError(err.message || 'Could not load adoptable pets.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === latestRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => {
     getAdoptionRequests().then(setRequests);
-    fetchAdoptions('all');
-  }, [fetchAdoptions]);
+  }, []);
 
-  const handleFilterChange = (newFilter) => {
-    setFilter(newFilter);
+  // Load the list again whenever a different tab is chosen
+  useEffect(() => {
     setLoading(true);
-    fetchAdoptions(newFilter);
-  };
+    loadPets(filter);
+  }, [filter, loadPets]);
+
+  const handleFilterChange = (newFilter) => setFilter(newFilter);
+
+  // Show only the chosen species, even if the server sent more than was asked for
+  const visiblePets = filter === 'all' ? pets : pets.filter((pet) => speciesOf(pet) === filter);
+  const activeFilter = FILTERS.find((item) => item.id === filter) || FILTERS[0];
 
   const requestedIds = requests.map((r) => r.petId);
 
@@ -159,7 +177,7 @@ export default function AdoptionScreen({ navigation }) {
               Adopt a <Accent>Pet</Accent>
             </>
           }
-          subtitle="Rescued animals from Bengaluru looking for a loving family."
+          subtitle="Every animal here was rescued in Bengaluru and is waiting for a loving family."
           left={
             <SegmentedNav
               activeKey="nav"
@@ -174,7 +192,7 @@ export default function AdoptionScreen({ navigation }) {
           refreshing={refreshing}
           onRefresh={() => {
             setRefreshing(true);
-            fetchAdoptions();
+            loadPets(filter);
           }}
           tintColor={colors.forest}
         />
@@ -216,17 +234,21 @@ export default function AdoptionScreen({ navigation }) {
             style={{ marginTop: 10 }}
             onPress={() => {
               setLoading(true);
-              fetchAdoptions(filter);
+              loadPets(filter);
             }}
           />
         </View>
-      ) : pets.length === 0 ? (
+      ) : visiblePets.length === 0 ? (
         <View style={styles.emptyCard}>
-          <Text maxFontSizeMultiplier={1.3} style={styles.emptyTitle}>No animals in this group yet</Text>
-          <Text maxFontSizeMultiplier={1.3} style={styles.emptyText}>Check back soon, new rescues are added regularly.</Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.emptyTitle}>
+            {`No ${activeFilter.plural} available right now`}
+          </Text>
+          <Text maxFontSizeMultiplier={1.3} style={styles.emptyText}>
+            Check back soon. New rescues are added regularly.
+          </Text>
         </View>
       ) : (
-        pets.map((pet) => {
+        visiblePets.map((pet) => {
           const petId = pet._id || pet.id;
           const requested = requestedIds.includes(petId);
           return (

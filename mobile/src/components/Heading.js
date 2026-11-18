@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { colors, fonts } from '../theme';
 import { rs } from '../responsive';
 
@@ -35,12 +35,15 @@ export default function Heading({ children, eyebrow, align = 'left', size = 'md'
   );
 }
 
+// The title and eyebrow take the full width of their column (instead of shrinking to fit the text) and are
+// aligned with `textAlign`. On Android a shrink-wrapped title can wrap its last word onto a hidden second
+// line, so the last word (like "Pet" in "Adopt a Pet") disappeared.
 const styles = StyleSheet.create({
   left: {
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
   },
   centered: {
-    alignItems: 'center',
+    alignItems: 'stretch',
   },
   textCenter: {
     textAlign: 'center',
@@ -65,7 +68,9 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   accent: {
-    fontStyle: 'italic',
+    // The heading font has no italic. Android swaps in a different system font to fake one, which looks
+    // off-brand and can break the line, so Android keeps the heading font and relies on the underline.
+    fontStyle: Platform.OS === 'android' ? 'normal' : 'italic',
     textDecorationLine: 'underline',
     textDecorationColor: colors.coral,
   },
